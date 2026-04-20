@@ -1,6 +1,6 @@
 import {
   buildEdges, buildFaces, buildCubes,
-  getFaceEdges, getCubeFaces, getSupportingCubeOrigins,
+  getFaceEdges, getCubeFaces,
   edgeKey, faceKey, cubeKey
 } from './GameModel';
 import type {
@@ -107,30 +107,9 @@ export class GameState {
     return Array.from(this.cubeMap.values());
   }
 
-  /**
-   * Check gravity validity for an edge.
-   * An edge is valid if:
-   * - It is at y=0 (bottom layer), OR
-   * - At least one completed cube exists directly beneath it
-   */
+  /** All unplaced edges are valid — gravity rule removed. */
   isEdgeValid(edge: Edge): boolean {
-    if (this.edgeMap.get(edgeKey(edge))?.owner !== null) return false; // already placed
-
-    // Bottom layer: always valid if not placed
-    if (edge.start.y === 0) return true;
-
-    // Check if edge touching the bottom via direction
-    if (edge.direction === 'y' && edge.start.y === 0) return true;
-
-    // For edges not on bottom: need support from completed cubes beneath
-    const supportOrigins = getSupportingCubeOrigins(edge);
-    if (supportOrigins.length === 0) return false;
-
-    // At least one supporting cube must be complete
-    return supportOrigins.some(o => {
-      const cs = this.cubeMap.get(cubeKey({ origin: o }));
-      return cs?.complete === true;
-    });
+    return this.edgeMap.get(edgeKey(edge))?.owner === null;
   }
 
   getValidEdges(): Edge[] {

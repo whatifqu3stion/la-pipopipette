@@ -42,4 +42,5 @@ See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and pa
   - `src/game/Game.ts` — Orchestrator tying all modules together
   - `src/App.tsx` — React shell with HTML/CSS UI overlay (scores, turn indicator, buttons)
 - **PRD**: `attached_assets/3d_dots_boxes_prd-1_1776650032671.md`
+- **Spec note**: Gravity rule removed. All unplaced edges are valid moves.
 - **Dependencies**: three, @types/three

@@ -318,18 +318,7 @@ export default function App() {
         </button>
       </div>
 
-      {/* Gravity hint */}
-      <div style={{
-        position: 'absolute',
-        left: 20,
-        bottom: 80,
-        fontSize: 11,
-        color: 'rgba(255,255,255,0.2)',
-        maxWidth: 160,
-        lineHeight: 1.5,
-      }}>
-        Dim edges cannot be placed yet — need support below
-      </div>
+
 
       {/* Legend */}
       <div style={{
