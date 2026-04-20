@@ -5,15 +5,17 @@ import type { EdgeState, FaceState, CubeState } from './types';
 const PLAYER_COLORS: Record<string, number> = {
   A: 0x3a6ea5,
   B: 0xc75c5c,
-  neutral: 0x888888,
-  hover: 0xffdd44,
-  invalid: 0x444444,
+  neutral: 0x7a6555,  // warm medium-contrast ink
+  hover:   0x180a02,  // dark warm ink — strong contrast on hover
+  placed:  0x5a4535,  // fallback for already-placed (shouldn't show, but kept)
 };
+
+const BG_COLOR = 0xf5f0e8; // warm off-white paper
 
 const EDGE_RADIUS = 0.04;
 const POINT_RADIUS = 0.08;
-const FACE_OPACITY = 0.28;
-const CUBE_OPACITY = 0.55;
+const FACE_OPACITY = 0.13;  // very subtle
+const CUBE_OPACITY = 0.32;  // slightly stronger than faces
 
 export class Renderer {
   scene: THREE.Scene;
@@ -41,7 +43,7 @@ export class Renderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0f1117);
+    this.scene.background = new THREE.Color(BG_COLOR);
 
     const w = canvas.clientWidth || canvas.width || 800;
     const h = canvas.clientHeight || canvas.height || 600;
@@ -56,28 +58,31 @@ export class Renderer {
     this.sharedSphereGeo = new THREE.SphereGeometry(POINT_RADIUS, 8, 8);
     this.sharedCylinderGeo = new THREE.CylinderGeometry(EDGE_RADIUS, EDGE_RADIUS, 1, 8);
 
-    // Shared materials
-    this.matNeutralEdge = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.neutral, roughness: 0.7, metalness: 0.1 });
-    this.matHoverEdge = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.hover, roughness: 0.5, metalness: 0.2, emissive: new THREE.Color(0xffdd44), emissiveIntensity: 0.3 });
-    this.matInvalidEdge = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.invalid, roughness: 0.9, metalness: 0 });
-    this.matPlayerA = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.A, roughness: 0.5, metalness: 0.2 });
-    this.matPlayerB = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.B, roughness: 0.5, metalness: 0.2 });
-    this.matPoint = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6, metalness: 0.1 });
+    // Shared materials — tuned for paper background
+    this.matNeutralEdge = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.neutral, roughness: 0.8, metalness: 0 });
+    this.matHoverEdge   = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.hover,   roughness: 0.5, metalness: 0 });
+    this.matInvalidEdge = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.neutral, roughness: 0.9, metalness: 0 });
+    this.matPlayerA = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.A, roughness: 0.6, metalness: 0 });
+    this.matPlayerB = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.B, roughness: 0.6, metalness: 0 });
+    this.matPoint   = new THREE.MeshStandardMaterial({ color: 0x5a4535, roughness: 0.8, metalness: 0 });
 
     this.setupLighting();
     this.setupCamera();
   }
 
   private setupLighting() {
-    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    // Warm ambient to match paper background
+    const ambient = new THREE.AmbientLight(0xfff8f0, 0.7);
     this.scene.add(ambient);
 
-    const dir1 = new THREE.DirectionalLight(0xffffff, 0.8);
+    // Warm primary light from upper-right
+    const dir1 = new THREE.DirectionalLight(0xfff5e8, 0.6);
     dir1.position.set(5, 8, 5);
     this.scene.add(dir1);
 
-    const dir2 = new THREE.DirectionalLight(0x8898ff, 0.3);
-    dir2.position.set(-5, 3, -5);
+    // Soft warm fill from opposite side
+    const dir2 = new THREE.DirectionalLight(0xffe8d0, 0.2);
+    dir2.position.set(-4, 2, -4);
     this.scene.add(dir2);
   }
 
