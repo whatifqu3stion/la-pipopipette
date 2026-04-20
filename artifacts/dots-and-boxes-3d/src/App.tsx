@@ -2,18 +2,24 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from './game/Game';
 import type { Owner } from './game/types';
 
-// PRD colors — kept for player identity
+// PRD player colors
 const PLAYER_COLORS: Record<string, string> = {
   A: '#3a6ea5',
   B: '#c75c5c',
 };
 
 // Paper palette
-const BG = '#f5f0e8';
-const INK = '#2c1a0e';
+const BG      = '#f5f0e8';
+const INK     = '#2c1a0e';
 const INK_MED = 'rgba(44,26,14,0.52)';
 const INK_DIM = 'rgba(44,26,14,0.35)';
 const INK_FAINT = 'rgba(44,26,14,0.10)';
+
+// Safe-area-aware padding helpers (CSS calc strings)
+const safeTop    = 'calc(env(safe-area-inset-top, 0px) + 12px)';
+const safeBottom = 'calc(env(safe-area-inset-bottom, 0px) + 10px)';
+const safeLeft   = 'calc(env(safe-area-inset-left, 0px) + 12px)';
+const safeRight  = 'calc(env(safe-area-inset-right, 0px) + 12px)';
 
 interface UIState {
   currentPlayer: 'A' | 'B';
@@ -23,106 +29,175 @@ interface UIState {
   canUndo: boolean;
 }
 
-function PlayerIndicator({ player, score, isActive }: { player: 'A' | 'B'; score: number; isActive: boolean }) {
+// ---------------------------------------------------------------------------
+// PlayerIndicator
+// ---------------------------------------------------------------------------
+function PlayerIndicator({
+  player, score, isActive,
+}: { player: 'A' | 'B'; score: number; isActive: boolean }) {
   const color = PLAYER_COLORS[player];
   return (
     <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10,
-      padding: '8px 16px',
-      borderRadius: 12,
-      background: isActive ? `${color}18` : 'rgba(44,26,14,0.04)',
-      border: `2px solid ${isActive ? color : INK_FAINT}`,
-      transition: 'all 0.2s ease',
-      minWidth: 100,
+      display:        'flex',
+      alignItems:     'center',
+      gap:            8,
+      padding:        '7px 12px',
+      borderRadius:   12,
+      background:     isActive ? `${color}18` : 'rgba(44,26,14,0.04)',
+      border:         `2px solid ${isActive ? color : INK_FAINT}`,
+      transition:     'border-color 0.2s, background 0.2s',
+      minHeight:      44,
+      flexShrink:     0,
     }}>
+      {/* Colour dot */}
       <div style={{
-        width: 13,
-        height: 13,
+        width:      12,
+        height:     12,
         borderRadius: '50%',
         background: color,
-        boxShadow: isActive ? `0 0 7px ${color}77` : 'none',
-        transition: 'box-shadow 0.2s ease',
+        flexShrink: 0,
+        boxShadow:  isActive ? `0 0 6px ${color}88` : 'none',
+        transition: 'box-shadow 0.2s',
       }} />
       <div>
-        <div style={{ color: INK_MED, fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-          Player {player}
+        <div style={{
+          color:         INK_MED,
+          fontSize:      10,
+          fontWeight:    600,
+          letterSpacing: '0.07em',
+          textTransform: 'uppercase',
+          lineHeight:    1,
+          marginBottom:  2,
+        }}>
+          P{player}
         </div>
-        <div style={{ color: INK, fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{score}</div>
+        <div style={{
+          color:      INK,
+          fontSize:   22,
+          fontWeight: 700,
+          lineHeight: 1,
+        }}>
+          {score}
+        </div>
       </div>
     </div>
   );
 }
 
-function GameOverBanner({ winner, scores, onReset }: {
-  winner: Owner;
-  scores: { A: number; B: number };
-  onReset: () => void;
-}) {
+// ---------------------------------------------------------------------------
+// Game-over banner
+// ---------------------------------------------------------------------------
+function GameOverBanner({
+  winner, scores, onReset,
+}: { winner: Owner; scores: { A: number; B: number }; onReset: () => void }) {
   const color = winner ? PLAYER_COLORS[winner] : INK_MED;
-  const text = winner ? `Player ${winner} wins!` : "It's a draw!";
+  const text  = winner ? `Player ${winner} wins!` : "It's a draw!";
 
   return (
     <div style={{
-      position: 'absolute',
-      top: '50%',
-      left: '50%',
-      transform: 'translate(-50%, -50%)',
-      background: 'rgba(245,240,232,0.97)',
-      backdropFilter: 'blur(10px)',
-      border: `2px solid ${color}`,
-      borderRadius: 20,
-      padding: '32px 48px',
-      textAlign: 'center',
-      zIndex: 100,
-      minWidth: 280,
+      position:        'absolute',
+      inset:           0,
+      display:         'flex',
+      alignItems:      'center',
+      justifyContent:  'center',
+      zIndex:          100,
+      padding:         '0 24px',
     }}>
-      <div style={{ fontSize: 13, color: INK_MED, marginBottom: 8, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-        Game Over
-      </div>
-      <div style={{ fontSize: 32, fontWeight: 800, color, marginBottom: 16 }}>{text}</div>
-      <div style={{ display: 'flex', gap: 24, justifyContent: 'center', marginBottom: 24 }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: PLAYER_COLORS.A }}>{scores.A}</div>
-          <div style={{ fontSize: 11, color: INK_DIM, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Player A</div>
+      <div style={{
+        width:            '100%',
+        maxWidth:         340,
+        background:       'rgba(245,240,232,0.97)',
+        backdropFilter:   'blur(10px)',
+        border:           `2px solid ${color}`,
+        borderRadius:     20,
+        padding:          '28px 28px 24px',
+        textAlign:        'center',
+      }}>
+        <div style={{
+          fontSize:      12,
+          color:         INK_MED,
+          marginBottom:  6,
+          letterSpacing: '0.1em',
+          textTransform: 'uppercase',
+        }}>
+          Game Over
         </div>
-        <div style={{ fontSize: 24, color: INK_FAINT, alignSelf: 'center' }}>—</div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: PLAYER_COLORS.B }}>{scores.B}</div>
-          <div style={{ fontSize: 11, color: INK_DIM, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Player B</div>
+
+        <div style={{
+          fontSize:     28,
+          fontWeight:   800,
+          color,
+          marginBottom: 18,
+          lineHeight:   1.15,
+        }}>
+          {text}
         </div>
+
+        {/* Score row */}
+        <div style={{
+          display:         'flex',
+          gap:             20,
+          justifyContent:  'center',
+          marginBottom:    22,
+        }}>
+          {(['A', 'B'] as const).map(p => (
+            <div key={p} style={{ textAlign: 'center' }}>
+              <div style={{
+                fontSize:   26,
+                fontWeight: 700,
+                color:      PLAYER_COLORS[p],
+                lineHeight: 1,
+              }}>
+                {scores[p]}
+              </div>
+              <div style={{
+                fontSize:      10,
+                color:         INK_DIM,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                marginTop:     3,
+              }}>
+                Player {p}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={onReset}
+          style={{
+            background:   color,
+            color:        '#fff',
+            border:       'none',
+            borderRadius: 12,
+            padding:      '14px 0',
+            fontSize:     16,
+            fontWeight:   700,
+            cursor:       'pointer',
+            width:        '100%',
+            minHeight:    48,
+          }}
+        >
+          Play Again
+        </button>
       </div>
-      <button
-        onClick={onReset}
-        style={{
-          background: color,
-          color: '#fff',
-          border: 'none',
-          borderRadius: 10,
-          padding: '12px 32px',
-          fontSize: 16,
-          fontWeight: 700,
-          cursor: 'pointer',
-          width: '100%',
-        }}
-      >
-        Play Again
-      </button>
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const gameRef = useRef<Game | null>(null);
+  const gameRef   = useRef<Game | null>(null);
   const [webglError, setWebglError] = useState(false);
   const [ui, setUI] = useState<UIState>({
     currentPlayer: 'A',
-    scores: { A: 0, B: 0 },
-    gameOver: false,
-    winner: null,
-    canUndo: false,
+    scores:        { A: 0, B: 0 },
+    gameOver:      false,
+    winner:        null,
+    canUndo:       false,
   });
 
   const syncUI = useCallback(() => {
@@ -130,113 +205,122 @@ export default function App() {
     if (!game) return;
     setUI({
       currentPlayer: game.getCurrentPlayer(),
-      scores: game.getScores(),
-      gameOver: game.isGameOver(),
-      winner: game.getWinner(),
-      canUndo: game.canUndo(),
+      scores:        game.getScores(),
+      gameOver:      game.isGameOver(),
+      winner:        game.getWinner(),
+      canUndo:       game.canUndo(),
     });
   }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     let game: Game;
     try {
       game = new Game(canvas);
     } catch (err) {
-      console.error('Failed to initialize 3D renderer:', err);
+      console.error('WebGL init failed:', err);
       setWebglError(true);
       return;
     }
     gameRef.current = game;
     game.setStateChangeCallback(syncUI);
     syncUI();
-
-    return () => {
-      game.dispose();
-      gameRef.current = null;
-    };
+    return () => { game.dispose(); gameRef.current = null; };
   }, [syncUI]);
 
   const handleRotateLeft  = () => gameRef.current?.rotateCamera('left');
   const handleRotateRight = () => gameRef.current?.rotateCamera('right');
-  const handleUndo  = () => { gameRef.current?.undo();  syncUI(); };
-  const handleReset = () => { gameRef.current?.reset(); syncUI(); };
-
-  const btnBase: React.CSSProperties = {
-    borderRadius: 10,
-    padding: '10px 18px',
-    fontSize: 14,
-    fontWeight: 600,
-    transition: 'all 0.15s ease',
-    minWidth: 44,
-    minHeight: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontFamily: 'inherit',
-  };
-
-  const btnStyle = (active: boolean = true): React.CSSProperties => ({
-    ...btnBase,
-    background: active ? 'rgba(44,26,14,0.06)' : 'rgba(44,26,14,0.03)',
-    color: active ? INK : 'rgba(44,26,14,0.28)',
-    border: `1px solid ${active ? 'rgba(44,26,14,0.16)' : INK_FAINT}`,
-    cursor: active ? 'pointer' : 'not-allowed',
-  });
+  const handleUndo        = () => { gameRef.current?.undo();  syncUI(); };
+  const handleReset       = () => { gameRef.current?.reset(); syncUI(); };
 
   const currentColor = PLAYER_COLORS[ui.currentPlayer];
 
+  // Shared button style factory
+  const btn = (enabled = true): React.CSSProperties => ({
+    flex:            1,
+    minWidth:        0,
+    minHeight:       48,
+    display:         'flex',
+    alignItems:      'center',
+    justifyContent:  'center',
+    borderRadius:    12,
+    border:          `1px solid ${enabled ? 'rgba(44,26,14,0.16)' : INK_FAINT}`,
+    background:      enabled ? 'rgba(44,26,14,0.06)' : 'rgba(44,26,14,0.02)',
+    color:           enabled ? INK : 'rgba(44,26,14,0.26)',
+    fontSize:        15,
+    fontWeight:      600,
+    fontFamily:      'inherit',
+    cursor:          enabled ? 'pointer' : 'not-allowed',
+    transition:      'background 0.12s, border-color 0.12s',
+    userSelect:      'none',
+    WebkitUserSelect:'none',
+  });
+
+  // -------------------------------------------------------------------------
+  // WebGL error screen
+  // -------------------------------------------------------------------------
   if (webglError) {
     return (
       <div style={{
-        width: '100vw', height: '100vh',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: BG, color: INK,
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        textAlign: 'center', padding: 32,
+        position:       'fixed',
+        inset:          0,
+        display:        'flex',
+        alignItems:     'center',
+        justifyContent: 'center',
+        background:     BG,
+        color:          INK,
+        fontFamily:     '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        textAlign:      'center',
+        padding:        '0 32px',
       }}>
         <div>
-          <div style={{ fontSize: 32, marginBottom: 16 }}>⚠️</div>
-          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>WebGL Unavailable</div>
-          <div style={{ fontSize: 14, color: INK_MED }}>
-            This game requires WebGL. Please try a different browser or enable hardware acceleration.
+          <div style={{ fontSize: 36, marginBottom: 16 }}>⚠️</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+            WebGL unavailable
+          </div>
+          <div style={{ fontSize: 14, color: INK_MED, lineHeight: 1.5 }}>
+            This game requires WebGL. Please try a different browser or enable
+            hardware acceleration.
           </div>
         </div>
       </div>
     );
   }
 
+  // -------------------------------------------------------------------------
+  // Main layout
+  //
+  // Root is position:fixed / inset:0 — avoids the iOS 100vh bug where the
+  // browser toolbar eats into the viewport.
+  // -------------------------------------------------------------------------
   return (
     <div style={{
-      width: '100vw',
-      height: '100vh',
-      overflow: 'hidden',
+      position:   'fixed',
+      inset:      0,
+      overflow:   'hidden',
       background: BG,
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-      position: 'relative',
     }}>
-      {/* Three.js canvas */}
+
+      {/* ── Canvas (fills entire root) ── */}
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: '100%', display: 'block' }}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}
       />
 
-      {/*
-        Paper grain overlay — SVG feTurbulence renders static fractal noise.
-        mix-blend-mode: multiply darkens the paper surface where grain lands,
-        giving a fiber/tooth feel without any performance cost.
-      */}
+      {/* ── Paper grain overlay ── */}
       <svg
         aria-hidden="true"
         style={{
-          position: 'absolute', inset: 0,
-          width: '100%', height: '100%',
+          position:      'absolute',
+          inset:         0,
+          width:         '100%',
+          height:        '100%',
           pointerEvents: 'none',
-          zIndex: 1,
-          opacity: 0.08,
-          mixBlendMode: 'multiply' as React.CSSProperties['mixBlendMode'],
+          zIndex:        1,
+          opacity:       0.08,
+          mixBlendMode:  'multiply' as React.CSSProperties['mixBlendMode'],
         }}
       >
         <filter id="paper-grain">
@@ -246,107 +330,137 @@ export default function App() {
         <rect width="100%" height="100%" filter="url(#paper-grain)" />
       </svg>
 
-      {/* Top bar */}
+      {/* ── TOP BAR ── */}
       <div style={{
-        position: 'absolute',
-        top: 0, left: 0, right: 0,
-        zIndex: 10,
-        display: 'flex',
+        position:   'absolute',
+        top:        0,
+        left:       0,
+        right:      0,
+        zIndex:     10,
+        display:    'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '16px 20px',
-        background: `linear-gradient(to bottom, rgba(245,240,232,0.94) 0%, transparent 100%)`,
-        pointerEvents: 'none',
+        gap:        8,
+        // Safe-area-aware padding
+        paddingTop:    safeTop,
+        paddingLeft:   safeLeft,
+        paddingRight:  safeRight,
+        paddingBottom: '12px',
+        background:    'linear-gradient(to bottom, rgba(245,240,232,0.95) 0%, transparent 100%)',
       }}>
-        <div style={{ pointerEvents: 'auto' }}>
-          <PlayerIndicator player="A" score={ui.scores.A} isActive={!ui.gameOver && ui.currentPlayer === 'A'} />
-        </div>
+        {/* Player A */}
+        <PlayerIndicator
+          player="A"
+          score={ui.scores.A}
+          isActive={!ui.gameOver && ui.currentPlayer === 'A'}
+        />
 
-        {/* Center turn dot */}
-        <div style={{ textAlign: 'center', pointerEvents: 'none' }}>
-          {!ui.gameOver && (
+        {/* Centre turn / game-over indicator */}
+        <div style={{
+          flex:           1,
+          display:        'flex',
+          flexDirection:  'column',
+          alignItems:     'center',
+          justifyContent: 'center',
+          gap:            5,
+          pointerEvents:  'none',
+        }}>
+          {!ui.gameOver ? (
             <>
-              <div style={{ fontSize: 11, color: INK_DIM, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 5 }}>
+              <div style={{
+                fontSize:      10,
+                color:         INK_DIM,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+              }}>
                 Turn
               </div>
               <div style={{
-                width: 9,
-                height: 9,
+                width:        9,
+                height:       9,
                 borderRadius: '50%',
-                background: currentColor,
-                margin: '0 auto',
-                boxShadow: `0 0 8px ${currentColor}88`,
-                animation: 'pulse 1.6s ease-in-out infinite',
+                background:   currentColor,
+                boxShadow:    `0 0 8px ${currentColor}99`,
+                animation:    'pulse 1.6s ease-in-out infinite',
               }} />
             </>
-          )}
-          {ui.gameOver && (
-            <div style={{ fontSize: 12, color: INK_DIM, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+          ) : (
+            <div style={{
+              fontSize:      11,
+              color:         INK_DIM,
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+            }}>
               Game Over
             </div>
           )}
         </div>
 
-        <div style={{ pointerEvents: 'auto' }}>
-          <PlayerIndicator player="B" score={ui.scores.B} isActive={!ui.gameOver && ui.currentPlayer === 'B'} />
+        {/* Player B */}
+        <PlayerIndicator
+          player="B"
+          score={ui.scores.B}
+          isActive={!ui.gameOver && ui.currentPlayer === 'B'}
+        />
+      </div>
+
+      {/* ── BOTTOM BAR ── */}
+      <div style={{
+        position:       'absolute',
+        bottom:         0,
+        left:           0,
+        right:          0,
+        zIndex:         10,
+        display:        'flex',
+        flexDirection:  'column',
+        alignItems:     'stretch',
+        gap:            6,
+        paddingTop:     '8px',
+        paddingLeft:    safeLeft,
+        paddingRight:   safeRight,
+        paddingBottom:  safeBottom,
+        background:     'linear-gradient(to top, rgba(245,240,232,0.96) 0%, transparent 100%)',
+      }}>
+
+        {/* Hint */}
+        <div style={{
+          textAlign:     'center',
+          fontSize:      11,
+          color:         INK_DIM,
+          letterSpacing: '0.04em',
+          lineHeight:    1,
+          pointerEvents: 'none',
+        }}>
+          Tap an edge to place
+        </div>
+
+        {/* Button row — 4 equal flex buttons */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={handleRotateLeft}  style={btn()} title="Rotate left">↺</button>
+          <button
+            onClick={handleUndo}
+            disabled={!ui.canUndo}
+            style={btn(ui.canUndo)}
+            title="Undo last move"
+          >
+            Undo
+          </button>
+          <button onClick={handleReset}       style={btn()} title="Reset game">Reset</button>
+          <button onClick={handleRotateRight} style={btn()} title="Rotate right">↻</button>
         </div>
       </div>
 
-      {/* Bottom controls */}
-      <div style={{
-        position: 'absolute',
-        bottom: 0, left: 0, right: 0,
-        zIndex: 10,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 10,
-        padding: '16px 20px 24px',
-        background: `linear-gradient(to top, rgba(245,240,232,0.94) 0%, transparent 100%)`,
-      }}>
-        <button onClick={handleRotateLeft}  style={btnStyle()} title="Rotate left">↺</button>
-        <button onClick={handleUndo} disabled={!ui.canUndo} style={btnStyle(ui.canUndo)} title="Undo last move">
-          Undo
-        </button>
-
-        <div style={{ fontSize: 12, color: INK_DIM, textAlign: 'center', padding: '0 8px', letterSpacing: '0.03em' }}>
-          Tap edges to place
-        </div>
-
-        <button onClick={handleReset} style={btnStyle()} title="Reset game">Reset</button>
-        <button onClick={handleRotateRight} style={btnStyle()} title="Rotate right">↻</button>
-      </div>
-
-      {/* Player legend */}
-      <div style={{
-        position: 'absolute',
-        right: 20,
-        bottom: 80,
-        zIndex: 10,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        alignItems: 'flex-end',
-      }}>
-        {(['A', 'B'] as const).map(p => (
-          <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 11, color: INK_DIM }}>Player {p}</span>
-            <div style={{ width: 11, height: 11, borderRadius: 3, background: PLAYER_COLORS[p] }} />
-          </div>
-        ))}
-      </div>
-
+      {/* ── Game-over overlay ── */}
       {ui.gameOver && (
         <GameOverBanner winner={ui.winner} scores={ui.scores} onReset={handleReset} />
       )}
 
       <style>{`
         @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.55; transform: scale(0.82); }
+          0%, 100% { opacity: 1;    transform: scale(1); }
+          50%       { opacity: 0.5; transform: scale(0.8); }
         }
         button:hover:not(:disabled) {
-          background: rgba(44,26,14,0.11) !important;
+          background:   rgba(44,26,14,0.11) !important;
           border-color: rgba(44,26,14,0.22) !important;
         }
         button:active:not(:disabled) {
