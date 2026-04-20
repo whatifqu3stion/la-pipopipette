@@ -25,3 +25,21 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - `pnpm --filter @workspace/api-server run dev` — run API server locally
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+
+## Artifacts
+
+### 3D Dots & Boxes (`artifacts/dots-and-boxes-3d`)
+- **Type**: react-vite, preview at `/`
+- **Stack**: React + Vite + Three.js (TypeScript)
+- **Description**: 3D Dots & Boxes game with gravity rule. Two-player same-device turn-based strategy.
+- **Modules**:
+  - `src/game/types.ts` — TypeScript types (Edge, Face, Cube, Owner, etc.)
+  - `src/game/GameModel.ts` — Pure data model: grid building, adjacency logic, gravity support
+  - `src/game/GameState.ts` — Game logic: turn management, scoring, undo, event system
+  - `src/game/Renderer.ts` — Three.js scene: points, edges (with hit zones), faces, cubes
+  - `src/game/CameraController.ts` — Fixed isometric camera with 90° rotation + overshoot animation
+  - `src/game/InputController.ts` — Mouse/touch raycast input handling
+  - `src/game/Game.ts` — Orchestrator tying all modules together
+  - `src/App.tsx` — React shell with HTML/CSS UI overlay (scores, turn indicator, buttons)
+- **PRD**: `attached_assets/3d_dots_boxes_prd-1_1776650032671.md`
+- **Dependencies**: three, @types/three
