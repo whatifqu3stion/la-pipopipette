@@ -223,10 +223,34 @@ export default function App() {
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
 
+      {/*
+        Paper grain overlay — SVG feTurbulence renders static fractal noise.
+        mix-blend-mode: multiply darkens the paper surface where grain lands,
+        giving a fiber/tooth feel without any performance cost.
+      */}
+      <svg
+        aria-hidden="true"
+        style={{
+          position: 'absolute', inset: 0,
+          width: '100%', height: '100%',
+          pointerEvents: 'none',
+          zIndex: 1,
+          opacity: 0.08,
+          mixBlendMode: 'multiply' as React.CSSProperties['mixBlendMode'],
+        }}
+      >
+        <filter id="paper-grain">
+          <feTurbulence type="fractalNoise" baseFrequency="0.68" numOctaves="4" stitchTiles="stitch" />
+          <feColorMatrix type="saturate" values="0" />
+        </filter>
+        <rect width="100%" height="100%" filter="url(#paper-grain)" />
+      </svg>
+
       {/* Top bar */}
       <div style={{
         position: 'absolute',
         top: 0, left: 0, right: 0,
+        zIndex: 10,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -272,6 +296,7 @@ export default function App() {
       <div style={{
         position: 'absolute',
         bottom: 0, left: 0, right: 0,
+        zIndex: 10,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -297,6 +322,7 @@ export default function App() {
         position: 'absolute',
         right: 20,
         bottom: 80,
+        zIndex: 10,
         display: 'flex',
         flexDirection: 'column',
         gap: 6,
