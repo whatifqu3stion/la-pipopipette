@@ -2,15 +2,25 @@ import * as THREE from 'three';
 
 const TARGET = new THREE.Vector3(1, 1, 1);
 const CAMERA_DIST = 6;
-const CAMERA_ELEVATION = Math.PI / 5; // ~36 degrees up
+
+// 42° elevation: high enough to see the top layer and internal structure,
+// comfortable enough not to look like a top-down plan view.
+const CAMERA_ELEVATION = Math.PI * 7 / 30; // ~42°
+
 const ROTATION_DURATION = 300; // ms
 const SETTLE_DURATION = 100; // ms
 const OVERSHOOT_DEGREES = 3; // degrees
 
+// Four preset diagonal azimuths (NE, NW, SW, SE corners of the board).
+// 45° offset from cardinal so every view shows two faces of the board simultaneously.
+const DIAGONAL_START = Math.PI / 4; // 45°
+const STEP           = Math.PI / 2; // 90° between presets
+
 export class CameraController {
   private camera: THREE.PerspectiveCamera;
-  private currentAngle = 0; // Y-axis rotation angle in radians
-  private targetAngle = 0;
+  // Start at the first diagonal view (NE corner, looking SW toward the board)
+  private currentAngle = DIAGONAL_START;
+  private targetAngle  = DIAGONAL_START;
   private isAnimating = false;
   private animStartTime = 0;
   private animStartAngle = 0;
@@ -33,7 +43,7 @@ export class CameraController {
   rotate(direction: 'left' | 'right'): boolean {
     if (this.isAnimating) return false;
 
-    const delta = direction === 'left' ? -Math.PI / 2 : Math.PI / 2;
+    const delta = direction === 'left' ? -STEP : STEP;
     this.animStartAngle = this.currentAngle;
     this.animTargetAngle = this.currentAngle + delta;
     this.targetAngle = this.animTargetAngle;
@@ -94,9 +104,9 @@ export class CameraController {
   }
 
   reset() {
-    this.currentAngle = 0;
-    this.targetAngle = 0;
-    this.isAnimating = false;
+    this.currentAngle = DIAGONAL_START;
+    this.targetAngle  = DIAGONAL_START;
+    this.isAnimating  = false;
     this.updateCameraPosition();
   }
 }
