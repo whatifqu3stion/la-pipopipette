@@ -9,7 +9,7 @@ export class InputController {
   private canvas: HTMLCanvasElement;
   private enabled = true;
 
-  private onEdgePlaced: (() => void) | null = null;
+  private onEdgePlaced: ((key: string, owner: 'A' | 'B') => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, renderer: Renderer, state: GameState) {
     this.canvas = canvas;
@@ -21,7 +21,7 @@ export class InputController {
     this.enabled = enabled;
   }
 
-  onPlace(cb: () => void) {
+  onPlace(cb: (key: string, owner: 'A' | 'B') => void) {
     this.onEdgePlaced = cb;
   }
 
@@ -49,9 +49,10 @@ export class InputController {
     const edgeState = edges.find(e => edgeKey(e.edge) === hitKey);
     if (!edgeState) return;
 
+    const owner  = this.state.getCurrentPlayer(); // capture before state mutates
     const placed = this.state.placeEdge(edgeState.edge);
     if (placed && this.onEdgePlaced) {
-      this.onEdgePlaced();
+      this.onEdgePlaced(hitKey, owner);
     }
   }
 

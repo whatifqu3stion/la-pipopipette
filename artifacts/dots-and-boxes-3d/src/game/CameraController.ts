@@ -1,11 +1,10 @@
 import * as THREE from 'three';
 
 const TARGET = new THREE.Vector3(1, 1, 1);
-const CAMERA_DIST = 6;
+const CAMERA_DIST = 7; // slightly further — board breathes more
 
-// 42° elevation: high enough to see the top layer and internal structure,
-// comfortable enough not to look like a top-down plan view.
-const CAMERA_ELEVATION = Math.PI * 7 / 30; // ~42°
+// 45° elevation: true 3/4 view — interior structure clearly visible
+const CAMERA_ELEVATION = Math.PI / 4; // 45°
 
 const ROTATION_DURATION = 300; // ms
 const SETTLE_DURATION = 100; // ms

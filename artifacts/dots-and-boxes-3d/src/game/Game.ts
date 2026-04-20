@@ -59,8 +59,9 @@ export class Game {
       this.inputCtrl.handleMove(touch.clientX, touch.clientY);
     }, { passive: false });
 
-    this.inputCtrl.onPlace(() => {
+    this.inputCtrl.onPlace((placedKey, placedOwner) => {
       this.syncRendererWithState();
+      this.renderer.setLastPlacedEdge(placedKey, placedOwner);
       this.stateChangeCallback?.();
     });
 
@@ -106,6 +107,7 @@ export class Game {
 
   undo() {
     if (this.state.undo()) {
+      this.renderer.clearLastPlaced();
       this.syncRendererWithState();
       this.stateChangeCallback?.();
     }
@@ -118,6 +120,7 @@ export class Game {
   reset() {
     this.state.reset();
     this.cameraCtrl.reset();
+    this.renderer.clearLastPlaced();
     this.syncRendererWithState();
     this.stateChangeCallback?.();
   }
