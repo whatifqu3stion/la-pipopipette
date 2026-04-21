@@ -211,7 +211,7 @@ export class Game {
     // ── Game logic callbacks ───────────────────────────────────────────────
     this.inputCtrl.onPlace((placedKey, placedOwner) => {
       this.syncRendererWithState();
-      this.renderer.setLastPlacedEdge(placedKey, placedOwner);
+      this.renderer.beginEdgePlaceAnim(placedKey, placedOwner);
       this.stateChangeCallback?.();
     });
 
@@ -231,7 +231,7 @@ export class Game {
   private startLoop() {
     const loop = (now: number) => {
       this.cameraCtrl.update(now);
-      this.renderer.render();
+      this.renderer.tick(now);
       this.animFrameId = requestAnimationFrame(loop);
     };
     this.animFrameId = requestAnimationFrame(loop);
