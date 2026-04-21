@@ -157,4 +157,33 @@ export function getEdgeFaces(edge: Edge, faces: Face[]): Face[] {
 }
 
 
+/**
+ * Get the 12 unique edges that form the wireframe of a cube.
+ * A cube at origin (ox, oy, oz) spans [ox, ox+1] × [oy, oy+1] × [oz, oz+1].
+ *
+ * - 4 edges parallel to x: along the 4 y-z corners
+ * - 4 edges parallel to y: along the 4 x-z corners
+ * - 4 edges parallel to z: along the 4 x-y corners
+ */
+export function getCubeEdges(cube: Cube): Edge[] {
+  const { x: ox, y: oy, z: oz } = cube.origin;
+  return [
+    // x-parallel
+    { start: { x: ox, y: oy,     z: oz     }, direction: 'x' },
+    { start: { x: ox, y: oy + 1, z: oz     }, direction: 'x' },
+    { start: { x: ox, y: oy,     z: oz + 1 }, direction: 'x' },
+    { start: { x: ox, y: oy + 1, z: oz + 1 }, direction: 'x' },
+    // y-parallel
+    { start: { x: ox,     y: oy, z: oz     }, direction: 'y' },
+    { start: { x: ox + 1, y: oy, z: oz     }, direction: 'y' },
+    { start: { x: ox,     y: oy, z: oz + 1 }, direction: 'y' },
+    { start: { x: ox + 1, y: oy, z: oz + 1 }, direction: 'y' },
+    // z-parallel
+    { start: { x: ox,     y: oy,     z: oz }, direction: 'z' },
+    { start: { x: ox + 1, y: oy,     z: oz }, direction: 'z' },
+    { start: { x: ox,     y: oy + 1, z: oz }, direction: 'z' },
+    { start: { x: ox + 1, y: oy + 1, z: oz }, direction: 'z' },
+  ];
+}
+
 export { edgeKey, faceKey, cubeKey, eq };

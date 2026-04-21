@@ -2,7 +2,7 @@ import { GameState } from './GameState';
 import { Renderer } from './Renderer';
 import { CameraController } from './CameraController';
 import { InputController } from './InputController';
-import { buildPoints, edgeKey } from './GameModel';
+import { buildPoints, edgeKey, getCubeEdges } from './GameModel';
 
 export class Game {
   private state: GameState;
@@ -36,7 +36,20 @@ export class Game {
 
   private syncRendererWithState() {
     const validEdgeKeys = new Set(this.state.getValidEdges().map(e => edgeKey(e)));
-    this.renderer.updateEdgeStates(this.state.getEdgeStates(), validEdgeKeys);
+
+    // Build a map of edgeKey → cube-owner for every edge that belongs to a
+    // completed cube.  Edges shared between two completed cubes get the last
+    // writer's colour — acceptable since both cubes are already done.
+    const completedCubeEdgeOwner = new Map<string, 'A' | 'B'>();
+    for (const { cube, complete, owner } of this.state.getCubeStates()) {
+      if (complete && owner) {
+        for (const edge of getCubeEdges(cube)) {
+          completedCubeEdgeOwner.set(edgeKey(edge), owner);
+        }
+      }
+    }
+
+    this.renderer.updateEdgeStates(this.state.getEdgeStates(), validEdgeKeys, completedCubeEdgeOwner);
     this.renderer.updateFaceStates(this.state.getFaceStates());
     this.renderer.updateCubeStates(this.state.getCubeStates());
   }

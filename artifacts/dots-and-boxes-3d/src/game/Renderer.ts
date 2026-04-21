@@ -16,12 +16,13 @@ const BG_COLOR = 0xf5f0e8;
 const NEUTRAL_COLOR = 0xc2b5a5;
 
 // ---------------------------------------------------------------------------
-// Geometry sizes — three visual tiers
+// Geometry sizes — four visual tiers
 // ---------------------------------------------------------------------------
-const RADIUS_NEUTRAL = 0.022; // thin — acts as guide
-const RADIUS_OWNED   = 0.038; // clear, readable
-const RADIUS_HOVER   = 0.052; // obviously larger on hover
-const RADIUS_POINT   = 0.042; // smaller joints
+const RADIUS_NEUTRAL   = 0.022; // thin  — unowned guide, recedes
+const RADIUS_COMPLETED = 0.028; // slim  — completed cube cage, visible but calm
+const RADIUS_OWNED     = 0.038; // medium— fully owned mid-game edge, reads clearly
+const RADIUS_HOVER     = 0.052; // thick — unmistakably interactive
+const RADIUS_POINT     = 0.042; // smaller joints
 
 // ---------------------------------------------------------------------------
 // Opacity values
@@ -142,18 +143,21 @@ export class Renderer {
   private cubeMeshes    = new Map<string, THREE.Mesh>();
 
   // Geometry tiers — shared, never disposed until renderer.dispose()
-  private geoNeutralEdge: THREE.CylinderGeometry;
-  private geoOwnedEdge:   THREE.CylinderGeometry;
-  private geoHoverEdge:   THREE.CylinderGeometry;
-  private geoPoint:       THREE.SphereGeometry;
+  private geoNeutralEdge:   THREE.CylinderGeometry; // thin  — unowned playable guide
+  private geoCompletedEdge: THREE.CylinderGeometry; // slim  — completed cube cage
+  private geoOwnedEdge:     THREE.CylinderGeometry; // medium— fully owned, not yet in complete cube
+  private geoHoverEdge:     THREE.CylinderGeometry; // thick — hover / interaction signal
+  private geoPoint:         THREE.SphereGeometry;
 
   // Edge materials
-  private matNeutralEdge: THREE.MeshStandardMaterial;
-  private matHoverEdge:   THREE.MeshStandardMaterial;  // bright amber — max clarity
-  private matPlayerA:     THREE.MeshStandardMaterial;
-  private matPlayerB:     THREE.MeshStandardMaterial;
-  private matLastA:       THREE.MeshStandardMaterial;  // brief post-place emphasis
-  private matLastB:       THREE.MeshStandardMaterial;
+  private matNeutralEdge:    THREE.MeshStandardMaterial;
+  private matHoverEdge:      THREE.MeshStandardMaterial; // bright amber — max clarity
+  private matPlayerA:        THREE.MeshStandardMaterial; // full player color (mid-game owned)
+  private matPlayerB:        THREE.MeshStandardMaterial;
+  private matCompletedEdgeA: THREE.MeshStandardMaterial; // lighter cage color for completed cubes
+  private matCompletedEdgeB: THREE.MeshStandardMaterial;
+  private matLastA:          THREE.MeshStandardMaterial; // brief post-place emphasis
+  private matLastB:          THREE.MeshStandardMaterial;
   private matPoint:       THREE.MeshStandardMaterial;
 
   // Interaction state
@@ -178,10 +182,11 @@ export class Renderer {
     this.renderer.shadowMap.enabled = false;
 
     // -- Geometry tiers --
-    this.geoNeutralEdge = new THREE.CylinderGeometry(RADIUS_NEUTRAL, RADIUS_NEUTRAL, 1, 6);
-    this.geoOwnedEdge   = new THREE.CylinderGeometry(RADIUS_OWNED,   RADIUS_OWNED,   1, 8);
-    this.geoHoverEdge   = new THREE.CylinderGeometry(RADIUS_HOVER,   RADIUS_HOVER,   1, 8);
-    this.geoPoint       = new THREE.SphereGeometry(RADIUS_POINT, 8, 8);
+    this.geoNeutralEdge   = new THREE.CylinderGeometry(RADIUS_NEUTRAL,   RADIUS_NEUTRAL,   1, 6);
+    this.geoCompletedEdge = new THREE.CylinderGeometry(RADIUS_COMPLETED, RADIUS_COMPLETED, 1, 7);
+    this.geoOwnedEdge     = new THREE.CylinderGeometry(RADIUS_OWNED,     RADIUS_OWNED,     1, 8);
+    this.geoHoverEdge     = new THREE.CylinderGeometry(RADIUS_HOVER,     RADIUS_HOVER,     1, 8);
+    this.geoPoint         = new THREE.SphereGeometry(RADIUS_POINT, 8, 8);
 
     // -- Materials --
     this.matNeutralEdge = new THREE.MeshStandardMaterial({
@@ -197,6 +202,11 @@ export class Renderer {
     });
     this.matPlayerA = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.A, roughness: 0.65, metalness: 0 });
     this.matPlayerB = new THREE.MeshStandardMaterial({ color: PLAYER_COLORS.B, roughness: 0.65, metalness: 0 });
+    // Completed cube cage — same hue family, lightened ~40% toward white so the
+    // cube volume (filled box) carries the ownership signal, not the cage wires.
+    // A: #3a6ea5 → lightened → ~#88a8c8   B: #c75c5c → lightened → ~#dc9898
+    this.matCompletedEdgeA = new THREE.MeshStandardMaterial({ color: 0x88a8c8, roughness: 0.80, metalness: 0 });
+    this.matCompletedEdgeB = new THREE.MeshStandardMaterial({ color: 0xdc9898, roughness: 0.80, metalness: 0 });
     // Brief post-placement brightness — same hue, slight emissive
     this.matLastA = new THREE.MeshStandardMaterial({
       color:             PLAYER_COLORS.A,
@@ -330,7 +340,11 @@ export class Renderer {
   // State updates
   // -------------------------------------------------------------------------
 
-  updateEdgeStates(edges: EdgeState[], validEdgeKeys: Set<string>) {
+  updateEdgeStates(
+    edges: EdgeState[],
+    validEdgeKeys: Set<string>,
+    completedCubeEdgeOwner: Map<string, 'A' | 'B'>,
+  ) {
     this.validEdgeKeys = validEdgeKeys;
 
     for (const { edge, owner } of edges) {
@@ -339,21 +353,34 @@ export class Renderer {
       if (!mesh) continue;
 
       if (key === this.hoveredEdgeKey && !owner) {
-        // Hover: thickest geometry + bright amber — clearly interactive
+        // ① Hover — thickest + bright amber, unmistakably interactive
         mesh.geometry = this.geoHoverEdge;
         mesh.material = this.matHoverEdge;
+
       } else if (key === this.lastPlacedEdgeKey && owner) {
-        // Brief post-placement glow
+        // ② Just placed — brief emissive flash before settling
         mesh.geometry = this.geoOwnedEdge;
         mesh.material = owner === 'A' ? this.matLastA : this.matLastB;
+
+      } else if (completedCubeEdgeOwner.has(key)) {
+        // ③ Part of a completed cube — slim cage wire in the cube owner's
+        //    lightened hue.  The filled box volume carries the ownership
+        //    signal; the cage should recede and not compete with playable edges.
+        const cubeOwner = completedCubeEdgeOwner.get(key)!;
+        mesh.geometry = this.geoCompletedEdge;
+        mesh.material = cubeOwner === 'A' ? this.matCompletedEdgeA : this.matCompletedEdgeB;
+
       } else if (owner === 'A') {
+        // ④ Owned, mid-game (not yet in a complete cube) — full player color
         mesh.geometry = this.geoOwnedEdge;
         mesh.material = this.matPlayerA;
+
       } else if (owner === 'B') {
         mesh.geometry = this.geoOwnedEdge;
         mesh.material = this.matPlayerB;
+
       } else {
-        // Neutral — thin and light, recedes behind player marks
+        // ⑤ Neutral / unplayed — thin pale guide, recedes completely
         mesh.geometry = this.geoNeutralEdge;
         mesh.material = this.matNeutralEdge;
       }
@@ -463,6 +490,7 @@ export class Renderer {
   dispose() {
     window.clearTimeout(this.lastPlacedTimer);
     this.geoNeutralEdge.dispose();
+    this.geoCompletedEdge.dispose();
     this.geoOwnedEdge.dispose();
     this.geoHoverEdge.dispose();
     this.geoPoint.dispose();
