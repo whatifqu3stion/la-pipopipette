@@ -55,23 +55,160 @@ export class Game {
   }
 
   private bindInput() {
-    this.canvas.addEventListener('mousemove', (e) => {
-      this.inputCtrl.handleMove(e.clientX, e.clientY);
+    const canvas = this.canvas;
+
+    // Pixels of movement before we commit to drag-rotate (vs tap-to-place)
+    const DRAG_THRESHOLD = 8;
+    // Radians of rotation per pixel of horizontal drag
+    // π / 500 ≈ a full 500 px swipe rotates 180°, so ~250 px ≈ 90°
+    const DRAG_FACTOR = Math.PI / 500;
+
+    // ── Mouse ──────────────────────────────────────────────────────────────
+    let mouseDown     = false;
+    let mouseStartX   = 0;
+    let mousePrevX    = 0;
+    let mouseDragging = false;
+
+    canvas.addEventListener('mousedown', (e) => {
+      mouseDown     = true;
+      mouseStartX   = e.clientX;
+      mousePrevX    = e.clientX;
+      mouseDragging = false;
     });
-    this.canvas.addEventListener('click', (e) => {
-      this.inputCtrl.handleClick(e.clientX, e.clientY);
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!mouseDown) {
+        this.inputCtrl.handleMove(e.clientX, e.clientY);
+        return;
+      }
+      const dx = e.clientX - mousePrevX;
+      mousePrevX = e.clientX;
+
+      if (!mouseDragging && Math.abs(e.clientX - mouseStartX) > DRAG_THRESHOLD) {
+        mouseDragging = true;
+        this.inputCtrl.setEnabled(false);
+        this.renderer.setHoveredEdge(null);
+      }
+      if (mouseDragging) {
+        this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
+      } else {
+        this.inputCtrl.handleMove(e.clientX, e.clientY);
+      }
     });
-    this.canvas.addEventListener('touchend', (e) => {
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (!mouseDown) return;
+      mouseDown = false;
+      if (mouseDragging) {
+        mouseDragging = false;
+        this.cameraCtrl.snapToNearest();
+        this.inputCtrl.setEnabled(true);
+      } else {
+        this.inputCtrl.handleClick(e.clientX, e.clientY);
+      }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      if (mouseDragging) {
+        this.cameraCtrl.snapToNearest();
+        this.inputCtrl.setEnabled(true);
+      }
+      mouseDown     = false;
+      mouseDragging = false;
+      this.renderer.setHoveredEdge(null);
+    });
+
+    // ── Touch ──────────────────────────────────────────────────────────────
+    let touchStartX   = 0;
+    let touchStartY   = 0;
+    let touchPrevX    = 0;
+    let touchDragging = false;
+    let touchPinching = false;
+    let pinchPrevDist = 0;
+
+    const getPinchDist = (touches: TouchList) =>
+      Math.hypot(
+        touches[1].clientX - touches[0].clientX,
+        touches[1].clientY - touches[0].clientY,
+      );
+
+    canvas.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      const touch = e.changedTouches[0];
-      this.inputCtrl.handleClick(touch.clientX, touch.clientY);
-    }, { passive: false });
-    this.canvas.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      const touch = e.touches[0];
-      this.inputCtrl.handleMove(touch.clientX, touch.clientY);
+      if (e.touches.length === 1) {
+        const t      = e.touches[0];
+        touchStartX  = touchPrevX = t.clientX;
+        touchStartY  = t.clientY;
+        touchDragging = false;
+        touchPinching = false;
+      } else if (e.touches.length === 2) {
+        // Second finger down — commit to pinch, cancel any ongoing drag
+        touchPinching  = true;
+        touchDragging  = false;
+        pinchPrevDist  = getPinchDist(e.touches);
+        this.renderer.setHoveredEdge(null);
+        this.inputCtrl.setEnabled(true); // restore in case drag was active
+      }
     }, { passive: false });
 
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (touchPinching && e.touches.length >= 2) {
+        const d      = getPinchDist(e.touches);
+        const factor = d / pinchPrevDist;
+        this.cameraCtrl.zoom(factor);
+        pinchPrevDist = d;
+        return;
+      }
+      if (!touchPinching && e.touches.length === 1) {
+        const t   = e.touches[0];
+        const dx  = t.clientX - touchPrevX;
+        touchPrevX = t.clientX;
+
+        const totalDrag = Math.hypot(
+          t.clientX - touchStartX,
+          t.clientY - touchStartY,
+        );
+        if (!touchDragging && totalDrag > DRAG_THRESHOLD) {
+          touchDragging = true;
+          this.inputCtrl.setEnabled(false);
+          this.renderer.setHoveredEdge(null);
+        }
+        if (touchDragging) {
+          this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
+        } else {
+          this.inputCtrl.handleMove(t.clientX, t.clientY);
+        }
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (touchPinching) {
+        if (e.touches.length < 2) touchPinching = false;
+        return;
+      }
+      if (touchDragging) {
+        touchDragging = false;
+        this.cameraCtrl.snapToNearest();
+        this.inputCtrl.setEnabled(true);
+      } else {
+        // Short tap — place edge
+        const t = e.changedTouches[0];
+        this.inputCtrl.handleClick(t.clientX, t.clientY);
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchcancel', () => {
+      if (touchDragging) {
+        this.cameraCtrl.snapToNearest();
+        this.inputCtrl.setEnabled(true);
+      }
+      touchDragging = false;
+      touchPinching = false;
+      this.renderer.setHoveredEdge(null);
+    });
+
+    // ── Game logic callbacks ───────────────────────────────────────────────
     this.inputCtrl.onPlace((placedKey, placedOwner) => {
       this.syncRendererWithState();
       this.renderer.setLastPlacedEdge(placedKey, placedOwner);
@@ -82,12 +219,13 @@ export class Game {
       this.stateChangeCallback?.();
     });
 
+    // ── Resize ────────────────────────────────────────────────────────────
     const ro = new ResizeObserver(() => {
-      const w = this.canvas.clientWidth;
-      const h = this.canvas.clientHeight;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
       if (w > 0 && h > 0) this.renderer.resize(w, h);
     });
-    ro.observe(this.canvas);
+    ro.observe(canvas);
   }
 
   private startLoop() {
