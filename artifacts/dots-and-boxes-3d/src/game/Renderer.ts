@@ -115,6 +115,67 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Ink dot geometry — hand-placed corner anchors
+//
+// Corner dots used to be a single shared SphereGeometry — perfectly round,
+// identical, machine-clean.  Against the wavy hand-drawn edges they read as
+// CG.  These helpers produce a per-dot deterministic geometry with subtle
+// vertex wobble and per-axis squish, plus a slight tilt — so each dot looks
+// hand-placed but is stable across frames and reloads (seeded by the dot's
+// integer grid position).
+// ---------------------------------------------------------------------------
+const INK_DOT_WOBBLE = 0.10; // ±10% radial vertex displacement
+const INK_DOT_SQUISH = 0.18; // ±9% per-axis scale variation
+const INK_DOT_TILT   = 0.40; // ±0.4 rad tilt on each axis
+
+function hashPoint(p: { x: number; y: number; z: number }): number {
+  return hashEdgeKey(`P:${p.x},${p.y},${p.z}`);
+}
+
+interface InkDotShape {
+  geo:   THREE.SphereGeometry;
+  scale: THREE.Vector3;
+  rot:   THREE.Euler;
+}
+
+function makeInkDot(seed: number, baseRadius: number): InkDotShape {
+  const rng = mulberry32(seed);
+  const geo = new THREE.SphereGeometry(baseRadius, 12, 10);
+  const pos = geo.attributes.position;
+  // Per-vertex radial wobble — irregular ink-dot silhouette
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const len = Math.sqrt(x * x + y * y + z * z) || 1;
+    const w   = 1 + (rng() * 2 - 1) * INK_DOT_WOBBLE;
+    pos.setXYZ(
+      i,
+      (x / len) * baseRadius * w,
+      (y / len) * baseRadius * w,
+      (z / len) * baseRadius * w,
+    );
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  // Per-axis squish — each dot a slightly different shape, never larger
+  // than the baseline radius (hit feel and visual weight stay consistent)
+  const half = INK_DOT_SQUISH * 0.5;
+  const sx = 1 - half + rng() * INK_DOT_SQUISH;
+  const sy = 1 - half + rng() * INK_DOT_SQUISH;
+  const sz = 1 - half + rng() * INK_DOT_SQUISH;
+  // Subtle tilt — tiny rotation so wobble pattern doesn't all align
+  const rx = (rng() * 2 - 1) * INK_DOT_TILT;
+  const ry = (rng() * 2 - 1) * INK_DOT_TILT;
+  const rz = (rng() * 2 - 1) * INK_DOT_TILT;
+  return {
+    geo,
+    scale: new THREE.Vector3(sx, sy, sz),
+    rot:   new THREE.Euler(rx, ry, rz),
+  };
+}
+
 function makeSketchCurve(key: string): THREE.CatmullRomCurve3 {
   const rng = mulberry32(hashEdgeKey(key));
   const N   = 6;
@@ -148,23 +209,65 @@ const FACE_VERT = /* glsl */`
   }
 `;
 
+// Shared GLSL: smooth value noise + 4-octave fBm.
+// Used by both face and cube shaders to produce watercolor-style washes
+// (organic, low-frequency density variation) instead of high-frequency
+// hashed pixel grain.  Same hash21() helper as before — kept for
+// compatibility with any future per-pixel uses.
+const SKETCH_NOISE_GLSL = /* glsl */`
+  float hash21(vec2 p) {
+    p = fract(p * vec2(127.1, 311.7));
+    p += dot(p, p + 17.31);
+    return fract(p.x * p.y);
+  }
+  float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  }
+  float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 4; i++) {
+      v += a * vnoise(p);
+      p *= 2.07;
+      a *= 0.5;
+    }
+    return v;
+  }
+`;
+
+// Face fill: a soft watercolor wash on the face's UV plane.
+// • fBm produces low-frequency density patches — denser pools and lighter
+//   regions, like real wet pigment unevenly settling on paper.
+// • A subtle "dry edge" pool ring near the perimeter mimics how watercolor
+//   migrates outward as the wash dries.
+// • A soft mask near the very edge of the UV square keeps the wash from
+//   reaching the corner pixels — pigment rarely fills a region perfectly.
 const FACE_FRAG = /* glsl */`
   uniform vec3  uColor;
   uniform float uOpacity;
   uniform vec2  uSeed;
   varying vec2  vUv;
 
-  float hash21(vec2 p) {
-    p = fract(p * vec2(127.1, 311.7));
-    p += dot(p, p + 17.31);
-    return fract(p.x * p.y);
-  }
+  ${SKETCH_NOISE_GLSL}
 
   void main() {
     if (uOpacity <= 0.001) discard;
-    float n     = hash21(floor(vUv * 20.0) + uSeed);
-    float noisy = uOpacity * (0.90 + n * 0.20);
-    gl_FragColor = vec4(uColor, clamp(noisy, 0.0, 1.0));
+    vec2  q       = vUv * 3.5 + uSeed;
+    float wash    = fbm(q);                         // 0..~1 organic patches
+    float washMod = 0.55 + 1.10 * wash;             // density: ~0.55..1.65
+    vec2  c       = abs(vUv - 0.5) * 2.0;
+    float edgeD   = max(c.x, c.y);                  // 0 center → 1 perimeter
+    float pool    = smoothstep(0.55, 0.92, edgeD) * 0.45;
+    float mask    = 1.0 - smoothstep(0.86, 1.0, edgeD);
+    float a       = uOpacity * (washMod + pool) * mask;
+    gl_FragColor  = vec4(uColor, clamp(a, 0.0, 1.0));
   }
 `;
 
@@ -182,6 +285,18 @@ const CUBE_VERT = /* glsl */`
   }
 `;
 
+// Cube fill: per-face watercolor wash + fresnel rim for painterly depth.
+// • Each BoxGeometry face has its own 0..1 UV space, so the fBm wash is
+//   independent on each face — like six separate brush strokes meeting
+//   at the corners of the volume.
+// • The fresnel rim (kept from the previous shader) deepens the wash near
+//   the true silhouette, mimicking how watercolor pools at the edge of a
+//   flat shape as it dries.
+// • Deliberately no UV-edge-derived terms (mask or pool).  Cube-face UV
+//   borders are internal seams between adjacent faces, not visual edges;
+//   any UV-edge darkening here would render as a hard dark line along
+//   each cube corner where two faces meet.  Only the view-dependent rim
+//   should drive perimeter density.
 const CUBE_FRAG = /* glsl */`
   uniform vec3  uColor;
   uniform float uOpacity;
@@ -190,19 +305,17 @@ const CUBE_FRAG = /* glsl */`
   varying vec3  vViewDir;
   varying vec2  vUv;
 
-  float hash21(vec2 p) {
-    p = fract(p * vec2(127.1, 311.7));
-    p += dot(p, p + 17.31);
-    return fract(p.x * p.y);
-  }
+  ${SKETCH_NOISE_GLSL}
 
   void main() {
     if (uOpacity <= 0.001) discard;
-    float ndv   = max(dot(vNormal, vViewDir), 0.0);
-    float rim   = pow(1.0 - ndv, 2.2);
-    float n     = hash21(floor(vUv * 12.0) + uSeed);
-    float alpha = uOpacity + rim * 0.16 + (n - 0.5) * 0.025;
-    gl_FragColor = vec4(uColor, clamp(alpha, 0.0, 1.0));
+    float ndv     = max(dot(vNormal, vViewDir), 0.0);
+    float rim     = pow(1.0 - ndv, 2.2);
+    vec2  q       = vUv * 3.0 + uSeed;
+    float wash    = fbm(q);                         // 0..~1 per-face patches
+    float washMod = 0.70 + 0.85 * wash;             // density: ~0.70..1.55
+    float a       = uOpacity * washMod + rim * 0.18;
+    gl_FragColor  = vec4(uColor, clamp(a, 0.0, 1.0));
   }
 `;
 
@@ -271,7 +384,9 @@ export class Renderer {
   // tube tiers per edge, all seeded deterministically from the edge key).
   // Only the dot/highlight geometries are shared.
   private geoHighlight: THREE.SphereGeometry;
-  private geoPoint:     THREE.SphereGeometry;
+  // Per-dot ink geometries (deterministic, irregular).  Tracked so dispose()
+  // can free GPU buffers — there is no shared geoPoint anymore.
+  private dotGeometries: THREE.SphereGeometry[] = [];
 
   // Materials
   private matNeutral:    THREE.MeshStandardMaterial;
@@ -355,10 +470,10 @@ export class Renderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 
-    // Shared geometries (corner dots + traveling spark). Edge stroke
-    // geometries are per-edge and live on EdgeSketchData.
+    // Shared geometry: only the traveling spark (sphere) is shared. Corner
+    // dots are per-instance ink geometries built lazily in initPoints, and
+    // edge stroke geometries are per-edge on EdgeSketchData.
     this.geoHighlight = new THREE.SphereGeometry(RADIUS_HIGHLIGHT, 8, 8);
-    this.geoPoint     = new THREE.SphereGeometry(RADIUS_POINT,     8, 8);
 
     // Materials
     // Neutral (unplayed) edges use a lit, very matte material with mild
@@ -581,12 +696,20 @@ export class Renderer {
   // ---------------------------------------------------------------------------
   initPoints(points: { x: number; y: number; z: number }[]) {
     for (const p of points) {
-      const mesh = new THREE.Mesh(this.geoPoint, this.matPoint);
+      // Per-dot ink shape — wobble + squish + tilt seeded from the dot's
+      // grid position, so every corner reads as hand-placed but the same
+      // dot always looks the same across reloads.  Geometry is owned per-
+      // mesh; tracked in dotGeometries for disposal.
+      const ink = makeInkDot(hashPoint(p), RADIUS_POINT);
+      const mesh = new THREE.Mesh(ink.geo, this.matPoint);
       mesh.position.set(p.x, p.y, p.z);
+      mesh.scale.copy(ink.scale);
+      mesh.rotation.copy(ink.rot);
       // Cast onto the implied floor — receiveShadow stays off so dots never
       // self-shadow against each other or against neighboring edges.
       mesh.castShadow = true;
       this.scene.add(mesh);
+      this.dotGeometries.push(ink.geo);
     }
   }
 
@@ -1014,7 +1137,8 @@ export class Renderer {
     }
     this.edgeSketches.clear();
     this.geoHighlight.dispose();
-    this.geoPoint.dispose();
+    for (const geo of this.dotGeometries) geo.dispose();
+    this.dotGeometries.length = 0;
     this.shadowFloor.geometry.dispose();
     this.shadowFloorMat.dispose();
     this.composerTarget?.dispose();
