@@ -552,7 +552,7 @@ export default function App() {
           >
             Undo
           </button>
-          <button onClick={handleReset}       style={btn()} title="Reset game">Reset</button>
+          <button onClick={handleReset}       style={btn()} title="Restart game">Restart</button>
           <button onClick={handleRotateRight} style={btn()} title="Rotate right">↻</button>
         </div>
       </div>
