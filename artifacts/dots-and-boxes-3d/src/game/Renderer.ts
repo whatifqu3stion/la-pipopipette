@@ -61,8 +61,8 @@ const FACE_FILL_MS = 1000;  // face "marker stroke" fill-in duration (ms)
 // zoomed in, halo-prone when zoomed out). To match how a real lens behaves
 // (shallower DoF the closer you get to the subject), we scale aperture and
 // maxblur inversely with camera distance, anchored at DOF_REF_DIST.
-const DOF_APERTURE_BASE = 0.0035; // strength at DOF_REF_DIST
-const DOF_MAXBLUR_BASE  = 0.009;  // cap at DOF_REF_DIST
+const DOF_APERTURE_BASE = 0.002975; // strength at DOF_REF_DIST (was 0.0035, -15%)
+const DOF_MAXBLUR_BASE  = 0.00765;  // cap at DOF_REF_DIST     (was 0.009,  -15%)
 const DOF_REF_DIST      = 7;      // matches CameraController ZOOM_DEFAULT
 
 // ---------------------------------------------------------------------------
