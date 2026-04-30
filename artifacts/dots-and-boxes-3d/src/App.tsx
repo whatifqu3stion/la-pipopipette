@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from './game/Game';
 import type { Owner } from './game/types';
-import paperTexture from '@assets/paper-tile_1777512842716.webp';
+import paperTexture from '@assets/paper-tile_1777521210667.webp';
 
 // Player colors — matched to the in-game palette in Renderer.ts so the UI
 // dots, score panels, and turn pulse all read as the same hue as the lines.
