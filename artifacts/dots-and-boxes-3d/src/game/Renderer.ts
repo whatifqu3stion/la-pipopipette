@@ -257,7 +257,11 @@ export class Renderer {
   // ---------------------------------------------------------------------------
   constructor(canvas: HTMLCanvasElement) {
     this.scene      = new THREE.Scene();
-    this.scene.background = new THREE.Color(BG_COLOR);
+    // Scene background stays unset (null). The WebGL canvas is rendered with
+    // a transparent clear color so the paper texture mounted on the page
+    // body in App.tsx becomes the visible board surface. Fog still fades
+    // cube fragments toward BG_COLOR (cream) — that cream then composites
+    // onto the paper texture, blending naturally with its average tone.
     // Linear fog — initial range is a sensible default for the fallback
     // camera distance (~7 units). The actual near/far values are recomputed
     // every frame in tick() relative to the current camera distance, so the
@@ -271,10 +275,12 @@ export class Renderer {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias:       true,
+      alpha:           true, // transparent clear → page paper bg shows through
       powerPreference: 'low-power',
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
+    this.renderer.setClearColor(0x000000, 0); // fully transparent clear
     // Soft shadow map — used only by the accent light to drop a faint
     // smudge onto the implied floor below the cube. Cube content does not
     // self-shadow (out of scope); only the floor receives.

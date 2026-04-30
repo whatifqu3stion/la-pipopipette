@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from './game/Game';
 import type { Owner } from './game/types';
+import paperTexture from '@assets/paper-tile_1777512842716.webp';
 
 // Player colors — matched to the in-game palette in Renderer.ts so the UI
 // dots, score panels, and turn pulse all read as the same hue as the lines.
@@ -229,6 +230,24 @@ export default function App() {
     syncUI();
     return () => { game.dispose(); gameRef.current = null; };
   }, [syncUI]);
+
+  // Mount the paper texture as the page background.  The WebGL canvas is
+  // rendered with a transparent clear color (see Renderer.ts) so this paper
+  // grain shows through as the actual board surface.  Scene fog still fades
+  // the back of the cube toward the cream BG color, which sits naturally on
+  // top of the paper texture.
+  useEffect(() => {
+    const url     = `url(${paperTexture})`;
+    const layered = `${BG} ${url} repeat`;
+    const prevHtml = document.documentElement.style.background;
+    const prevBody = document.body.style.background;
+    document.documentElement.style.background = layered;
+    document.body.style.background            = layered;
+    return () => {
+      document.documentElement.style.background = prevHtml;
+      document.body.style.background            = prevBody;
+    };
+  }, []);
 
   const handleRotateLeft  = () => gameRef.current?.rotateCamera('left');
   const handleRotateRight = () => gameRef.current?.rotateCamera('right');
