@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from './game/Game';
 import type { Owner } from './game/types';
-import paperTexture from '@assets/paper-tile_1777521210667.webp';
+import paperTexture       from '@assets/paper-tile_1777521210667.webp';
+import paperCrumpleOverlay from '@assets/white-paper-texture_1777522901345.jpg';
 
 // Player colors — matched to the in-game palette in Renderer.ts so the UI
 // dots, score panels, and turn pulse all read as the same hue as the lines.
@@ -358,27 +359,6 @@ export default function App() {
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}
       />
 
-      {/* ── Paper grain overlay ── */}
-      <svg
-        aria-hidden="true"
-        style={{
-          position:      'absolute',
-          inset:         0,
-          width:         '100%',
-          height:        '100%',
-          pointerEvents: 'none',
-          zIndex:        1,
-          opacity:       0.08,
-          mixBlendMode:  'multiply' as React.CSSProperties['mixBlendMode'],
-        }}
-      >
-        <filter id="paper-grain">
-          <feTurbulence type="fractalNoise" baseFrequency="0.68" numOctaves="4" stitchTiles="stitch" />
-          <feColorMatrix type="saturate" values="0" />
-        </filter>
-        <rect width="100%" height="100%" filter="url(#paper-grain)" />
-      </svg>
-
       {/* ── Vignette overlay ──
            The WebGL canvas renders an opaque cream (BG_COLOR) because the
            BokehPass post-process forces alpha=1.0 in its fragment shader,
@@ -394,8 +374,36 @@ export default function App() {
           width:          '100%',
           height:         '100%',
           pointerEvents:  'none',
-          zIndex:         2,
+          zIndex:         1,
           backgroundImage: PAPER_VIGNETTE,
+        }}
+      />
+
+      {/* ── Crumpled-paper overlay ──
+           A photo of crumpled paper layered over the entire board (canvas +
+           vignette) using `mix-blend-mode: multiply`. White areas of the
+           photo (most of it) leave the underlying pixels alone; the gray
+           crease shadows add subtle dark detail that reads as folded paper
+           catching light. Sized 'cover' so the crease pattern fills the
+           viewport without seams. Sits above the vignette so the creases
+           also accent the corner darkening, but below the UI (zIndex 10+)
+           so buttons and labels remain crisp. pointer-events: none keeps
+           the canvas fully interactive. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position:           'absolute',
+          inset:              0,
+          width:              '100%',
+          height:             '100%',
+          pointerEvents:      'none',
+          zIndex:             2,
+          backgroundImage:    `url(${paperCrumpleOverlay})`,
+          backgroundSize:     'cover',
+          backgroundPosition: 'center center',
+          backgroundRepeat:   'no-repeat',
+          opacity:            0.42,
+          mixBlendMode:       'multiply' as React.CSSProperties['mixBlendMode'],
         }}
       />
 
