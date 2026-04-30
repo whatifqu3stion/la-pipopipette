@@ -829,16 +829,21 @@ export class Renderer {
     // Bokeh — focus is set per-frame in tick() so it follows the cube.
     // Aperture controls how strong the blur grows with distance from focus;
     // maxblur clamps the total blur radius (in normalized screen units).
-    //   • aperture = 0.0055 — the cube spans ~3 world units front-to-back,
-    //     which now produces a visibly soft back face even at close zoom
-    //     instead of the previous near-imperceptible 3-4px smear.
-    //   • maxblur  = 0.006  — half the previous cap; this is what limits
-    //     the halo bleed where the cube silhouette meets the paper, so
-    //     the effect reads as depth-of-field rather than a drop shadow.
+    //
+    // Tuning principle: with `focus` parked on the cube's front face, the
+    // shader computes blur ∝ aperture · (focus − viewZ). The cube extends
+    // ~2.73 world units from front face to back corner, so we choose
+    //   aperture · 2.73 ≈ maxblur
+    // i.e. the cube only just reaches the cap at its deepest point. This
+    // keeps the gradient *continuous* through the whole front-to-back of
+    // the cube (front sharp → middle softer → back softest) instead of
+    // saturating partway through. The paper background sits a touch
+    // beyond the cube depth so it reads as "further away" without a
+    // jarring halo.
     this.bokehPass = new BokehPass(this.scene, this.camera, {
       focus:    7,        // overwritten per-frame
-      aperture: 0.0055,
-      maxblur:  0.006,
+      aperture: 0.0035,
+      maxblur:  0.009,
     });
     // BokehPass shader takes aspect from a uniform; keep it in sync on resize.
     (this.bokehPass.uniforms as Record<string, THREE.IUniform>).aspect.value = w / h;
