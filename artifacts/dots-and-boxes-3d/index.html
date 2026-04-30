@@ -9,6 +9,67 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script async src="https://vibejam.cc/2026/widget.js"></script>
+    <script>
+      // Re-anchor the Vibe Jam tracker to the middle of the right edge,
+      // rotated 90° counter-clockwise. The widget script appends a single
+      // <a href="https://vibej.am/"> to body and sets its style via
+      // .cssText (no !important), so external/inline overrides with
+      // !important win. Tracking (event listeners on document + heartbeat
+      // fetch to vibej.am) is independent of these visual styles, so we
+      // only touch positioning/transform — never the link target, the
+      // listeners, or the script itself.
+      (function () {
+        var anchor = null;
+        function applyStyles() {
+          if (!anchor) return;
+          // Measure the badge's natural (unrotated) size so we can flush
+          // its post-rotation right edge against the viewport edge — works
+          // for any text or font without hard-coded magic numbers. We
+          // briefly clear our own overrides so the measurement reflects
+          // the unrotated layout, then re-apply.
+          var s = anchor.style;
+          s.removeProperty('transform');
+          s.removeProperty('right');
+          var r = anchor.getBoundingClientRect();
+          var rightOffset = -((r.width - r.height) / 2);
+          s.setProperty('position',         'fixed',                                'important');
+          s.setProperty('top',              '50%',                                  'important');
+          s.setProperty('right',            rightOffset + 'px',                     'important');
+          s.setProperty('bottom',           'auto',                                 'important');
+          s.setProperty('left',             'auto',                                 'important');
+          s.setProperty('transform-origin', 'center center',                        'important');
+          s.setProperty('transform',        'translateY(-50%) rotate(-90deg)',      'important');
+          // After -90° rotation the original BOTTOM edge becomes the
+          // visible left side of the vertical tab (the side that pokes
+          // into the canvas, away from the screen edge). Round those two
+          // corners; leave the now-visible right side flush.
+          s.setProperty('border-radius',    '0 0 12px 12px',                        'important');
+        }
+        // Cap polling so we don't churn forever if the widget script is
+        // blocked (e.g., by an adblocker). 60 attempts × 50 ms = ~3 s.
+        var attempts = 0;
+        function findAnchor() {
+          anchor = document.querySelector('a[href="https://vibej.am/"]');
+          if (anchor) {
+            applyStyles();
+            // Re-measure on viewport changes so the right-edge flush
+            // stays correct under resize / orientation change.
+            var raf = 0;
+            window.addEventListener('resize', function () {
+              if (raf) return;
+              raf = requestAnimationFrame(function () { raf = 0; applyStyles(); });
+            });
+            return;
+          }
+          if (++attempts < 60) setTimeout(findAnchor, 50);
+        }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', findAnchor);
+        } else {
+          findAnchor();
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
