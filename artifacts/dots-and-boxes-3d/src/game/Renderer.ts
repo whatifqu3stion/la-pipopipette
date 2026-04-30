@@ -50,7 +50,7 @@ const RADIUS_POINT     = 0.038; // corner dots — anchor the grid
 const EDGE_ANIM_MS = 1000; // edge draw-in duration (ms) — paced like a hand stroke
 const EDGE_GLOW_MS = 350;  // post-draw emphasis duration (ms)
 const CUBE_ANIM_MS = 400;  // cube scale-in duration (ms)
-const FACE_FILL_MS = 800;  // face "marker stroke" fill-in duration (ms)
+const FACE_FILL_MS = 1000;  // face "marker stroke" fill-in duration (ms)
 
 // ---------------------------------------------------------------------------
 // Depth-of-field tuning
