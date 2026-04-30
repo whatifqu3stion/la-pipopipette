@@ -49,6 +49,7 @@ const RADIUS_POINT     = 0.038; // corner dots — anchor the grid
 const EDGE_ANIM_MS = 1000; // edge draw-in duration (ms) — paced like a hand stroke
 const EDGE_GLOW_MS = 350;  // post-draw emphasis duration (ms)
 const CUBE_ANIM_MS = 400;  // cube scale-in duration (ms)
+const FACE_FILL_MS = 800;  // face "marker stroke" fill-in duration (ms)
 
 // Glow swell that masks the wavy → straight geometry snap.
 // During the last (1 - GLOW_SWELL_START_FRAC) of the draw, the stroke's
@@ -380,9 +381,15 @@ const SKETCH_NOISE_GLSL = /* glsl */`
 //   migrates outward as the wash dries.
 // • A soft mask near the very edge of the UV square keeps the wash from
 //   reaching the corner pixels — pigment rarely fills a region perfectly.
+// • uFill (0..1) animates a serpentine "marker stroke" coloring-in motion:
+//   the face is split into N horizontal bands, and the fill sweeps left↔
+//   right across each band in turn (alternating direction) as uFill rises
+//   from 0 to 1. uFill = 1 ⇒ entire face revealed. The fill mask is
+//   multiplied into the alpha so unpainted pixels are fully transparent.
 const FACE_FRAG = /* glsl */`
   uniform vec3  uColor;
   uniform float uOpacity;
+  uniform float uFill;
   uniform vec2  uSeed;
   varying vec2  vUv;
 
@@ -397,7 +404,23 @@ const FACE_FRAG = /* glsl */`
     float edgeD   = max(c.x, c.y);                  // 0 center → 1 perimeter
     float pool    = smoothstep(0.55, 0.92, edgeD) * 0.45;
     float mask    = 1.0 - smoothstep(0.86, 1.0, edgeD);
-    float a       = uOpacity * (washMod + pool) * mask;
+
+    // Serpentine marker-stroke reveal. Each horizontal band fills L→R or
+    // R→L in alternation. Per-pixel "stroke time" is the abstract moment
+    // (in band units, 0..STROKES) when the marker tip reaches this pixel.
+    const float STROKES   = 5.0;
+    // min() guards the vUv.y == 1.0 edge row from quantising to a phantom
+    // 6th band (idx 5) that would never fill on some GPUs.
+    float       bandIdx   = min(floor(vUv.y * STROKES), STROKES - 1.0);
+    float       ltrFlag   = 1.0 - mod(bandIdx, 2.0);         // 1 = L→R, 0 = R→L
+    float       xPos      = mix(1.0 - vUv.x, vUv.x, ltrFlag);
+    float       pixelTime = bandIdx + xPos;                  // 0..STROKES
+    float       reach     = uFill * STROKES;                 // 0..STROKES
+    // Soft 1-band-thickness leading edge so the marker tip reads as a
+    // tiny ramp rather than a hard line — keeps the watercolor look.
+    float       fillMask  = 1.0 - smoothstep(reach - 0.04, reach + 0.04, pixelTime);
+
+    float a       = uOpacity * (washMod + pool) * mask * fillMask;
     gl_FragColor  = vec4(uColor, clamp(a, 0.0, 1.0));
   }
 `;
@@ -457,6 +480,7 @@ function makeFaceMat(): THREE.ShaderMaterial {
     uniforms: {
       uColor:   { value: new THREE.Color(1, 1, 1) },
       uOpacity: { value: 0.0 },
+      uFill:    { value: 1.0 }, // 0..1 — driven by tickFaceAnims when a face completes
       uSeed:    { value: new THREE.Vector2(Math.random() * 100, Math.random() * 100) },
     },
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
@@ -605,6 +629,13 @@ export class Renderer {
   // Cube scale-in animations — keyed by cubeKey
   private cubeAnimTimes = new Map<string, number>(); // cubeKey → startTime
   private cubeComplete  = new Set<string>();          // tracks which cubes have begun anim
+
+  // Face fill-in animations — keyed by faceKey. faceComplete tracks which
+  // faces are currently in the "completed" state so we only kick off the
+  // marker-stroke animation on the *transition* from incomplete → complete
+  // (not every frame the face is already complete).
+  private faceAnimTimes = new Map<string, number>(); // faceKey → startTime
+  private faceComplete  = new Set<string>();
 
   private raycaster     = new THREE.Raycaster();
   private validEdgeKeys = new Set<string>();
@@ -1143,7 +1174,8 @@ export class Renderer {
 
   updateFaceStates(faces: FaceState[]) {
     for (const { face, complete, owner } of faces) {
-      const mesh = this.faceMeshes.get(faceKey(face));
+      const key  = faceKey(face);
+      const mesh = this.faceMeshes.get(key);
       if (!mesh) continue;
       const mat = mesh.material as THREE.ShaderMaterial;
       if (complete) {
@@ -1151,8 +1183,22 @@ export class Renderer {
           owner === 'A' ? PLAYER_COLORS.A : owner === 'B' ? PLAYER_COLORS.B : 0xaaaaaa
         );
         mat.uniforms.uOpacity.value = FACE_OPACITY;
+
+        if (!this.faceComplete.has(key)) {
+          // Newly completed — kick off the marker-stroke fill animation.
+          this.faceComplete.add(key);
+          this.faceAnimTimes.set(key, performance.now());
+          mat.uniforms.uFill.value = 0;
+        }
       } else {
         mat.uniforms.uOpacity.value = 0.0;
+        // Reset tracking if the face reverted to incomplete (undo / reset)
+        // so the next completion plays the animation again.
+        if (this.faceComplete.has(key)) {
+          this.faceComplete.delete(key);
+          this.faceAnimTimes.delete(key);
+          mat.uniforms.uFill.value = 1;
+        }
       }
     }
   }
@@ -1398,6 +1444,21 @@ export class Renderer {
     }
   }
 
+  // Drive each active face's uFill from 0 → 1 over FACE_FILL_MS. Linear
+  // pacing reads as a steady-handed marker stroke; the back-and-forth
+  // serpentine motion itself is encoded in the shader (see FACE_FRAG).
+  private tickFaceAnims(now: number) {
+    for (const [key, startTime] of this.faceAnimTimes) {
+      const mesh = this.faceMeshes.get(key);
+      if (!mesh) { this.faceAnimTimes.delete(key); continue; }
+
+      const t   = Math.min((now - startTime) / FACE_FILL_MS, 1);
+      const mat = mesh.material as THREE.ShaderMaterial;
+      mat.uniforms.uFill.value = t;
+      if (t >= 1) this.faceAnimTimes.delete(key);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Main loop — called every frame from Game.ts instead of render()
   // ---------------------------------------------------------------------------
@@ -1406,6 +1467,7 @@ export class Renderer {
 
   tick(now: number) {
     this.tickEdgeAnims(now);
+    this.tickFaceAnims(now);
     this.tickCubeAnims(now);
     this.updateRimLight();
 
