@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from './game/Game';
 import type { Owner } from './game/types';
-import paperTexture       from '@assets/paper-tile_1777521210667.webp';
 import paperCrumpleOverlay from '@assets/white-paper-texture_1777522901345.jpg';
 
 // Player colors — matched to the in-game palette in Renderer.ts so the UI
@@ -21,28 +20,27 @@ const INK_FAINT = 'rgba(44,26,14,0.10)';
 // ---------------------------------------------------------------------------
 // Board background plate
 //
-// The visible board surface is built from two CSS background layers on the
-// root container (the canvas mounts on top with a transparent clear color,
-// so this whole stack reads through as the playing surface):
+// The visible board surface is now just a flat cream base color on the root
+// container. The canvas mounts on top with a transparent clear color, and
+// the crumpled-paper photo overlay (rendered separately further down in the
+// JSX) supplies all the visible paper character — creases, fold shadows,
+// and subtle warmth — via `mix-blend-mode: multiply`.
 //
-//   1. paper-tile webp texture   — the visible fiber grain.
-//   2. solid BG cream            — fallback / base tone underneath the
-//      texture's translucent fibers.
-//
-// A corner-darkening vignette used to live above this stack but was removed
-// because, on wide aspect ratios, the elliptical falloff caused the left/
-// right edges to read as a noticeably warmer yellow versus the center. The
-// background is now a uniform cream across the entire viewport.
+// Previous iterations of this background also stacked a small repeating
+// fiber-grain webp tile under the crumple overlay and a corner-darkening
+// vignette over it. Both have been removed: the vignette caused yellow
+// edge tinting on wide screens, and the fiber-grain tile was redundant
+// once the crumple overlay was already supplying texture. A slight warm
+// tint at the wide-screen edges remains as a known property of the kept
+// crumple overlay (cover-sized photo whose warmer regions land at the
+// edges in landscape).
 //
 // The fog target (BG_COLOR in Renderer.ts) is unchanged: back-facing edges
 // still fade toward the same cream, so the existing depth fade reads the
 // same near the cube.
 // ---------------------------------------------------------------------------
 const BOARD_BG_LAYERS: React.CSSProperties = {
-  backgroundColor:    BG,
-  backgroundImage:    `url(${paperTexture})`,
-  backgroundRepeat:   'repeat',
-  backgroundPosition: '0 0',
+  backgroundColor: BG,
 };
 
 // Safe-area-aware padding helpers (CSS calc strings)
