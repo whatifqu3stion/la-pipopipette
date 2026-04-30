@@ -837,7 +837,10 @@ export class Renderer {
     // Camera-relative rim light — its position is updated every frame in
     // tick() to sit opposite the camera, so it always silhouettes the back
     // of the structure and helps separate edges from the paper background.
-    this.rimLight = new THREE.DirectionalLight(0xeaf2ff, 0.20);
+    // Intensity tuned bright enough to actually paint a visible cool edge
+    // along back-facing surfaces (giving the cube real depth against the
+    // warmer key light) without competing with the player hues up front.
+    this.rimLight = new THREE.DirectionalLight(0xdde9ff, 0.50);
     this.rimLight.position.set(-5, 3, -5);
     this.scene.add(this.rimLight);
     this.scene.add(this.rimLight.target); // required so position changes take effect
