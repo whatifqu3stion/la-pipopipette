@@ -50,11 +50,11 @@
           // zIndex 2-3, UI at 10+; max-int here guarantees the badge
           // can never be covered by future layers).
           s.setProperty('z-index',          '2147483647',                           'important');
-          // After +90° rotation the original TOP edge becomes the
-          // visible left side of the vertical tab (the side that pokes
-          // into the canvas, away from the screen edge). Round those two
-          // corners; leave the now-visible right side flush.
-          s.setProperty('border-radius',    '12px 12px 0 0',                        'important');
+          // After +90° rotation (CW) the original BOTTOM edge becomes
+          // the visible left side of the vertical tab (the side that
+          // pokes into the canvas, away from the screen edge). Round
+          // those two corners; leave the now-visible right side flush.
+          s.setProperty('border-radius',    '0 0 12px 12px',                        'important');
           // Defence-in-depth against accidental hides — if any extension
           // or future style tries to suppress the tab via display /
           // visibility / opacity, our !important values win.
