@@ -17,6 +17,40 @@ const INK_MED = 'rgba(44,26,14,0.52)';
 const INK_DIM = 'rgba(44,26,14,0.35)';
 const INK_FAINT = 'rgba(44,26,14,0.10)';
 
+// ---------------------------------------------------------------------------
+// Board background plate
+//
+// The visible board surface is built from three CSS background layers on the
+// root container (the canvas mounts on top with a transparent clear color,
+// so this whole stack reads through as the playing surface):
+//
+//   1. radial-gradient vignette  — gentle warm-ink darkening at the corners
+//      so the eye is drawn to the cube in the center. Center is fully clear
+//      out past the cube's silhouette, then ramps softly to the edges. Sized
+//      to the viewport (100% 100%, no-repeat) so the wrap is consistent on
+//      any aspect ratio.
+//   2. paper-tile webp texture   — the visible fiber grain.
+//   3. solid BG cream            — fallback / base tone underneath the
+//      texture's translucent fibers.
+//
+// The fog target (BG_COLOR in Renderer.ts) is unchanged: back-facing edges
+// still fade toward the same cream that sits between paper and vignette,
+// so the existing depth fade behavior reads identically near the cube
+// (the cube sits in the center where the vignette is fully transparent).
+// ---------------------------------------------------------------------------
+const PAPER_VIGNETTE =
+  'radial-gradient(ellipse at center, ' +
+    'rgba(44,26,14,0) 35%, ' +
+    'rgba(44,26,14,0.07) 70%, ' +
+    'rgba(44,26,14,0.20) 100%)';
+const BOARD_BG_LAYERS: React.CSSProperties = {
+  backgroundColor:    BG,
+  backgroundImage:    `${PAPER_VIGNETTE}, url(${paperTexture})`,
+  backgroundRepeat:   'no-repeat, repeat',
+  backgroundSize:     '100% 100%, auto',
+  backgroundPosition: 'center center, 0 0',
+};
+
 // Safe-area-aware padding helpers (CSS calc strings)
 const safeTop    = 'calc(env(safe-area-inset-top, 0px) + 12px)';
 const safeBottom = 'calc(env(safe-area-inset-bottom, 0px) + 10px)';
@@ -231,23 +265,11 @@ export default function App() {
     return () => { game.dispose(); gameRef.current = null; };
   }, [syncUI]);
 
-  // Mount the paper texture as the page background.  The WebGL canvas is
-  // rendered with a transparent clear color (see Renderer.ts) so this paper
-  // grain shows through as the actual board surface.  Scene fog still fades
-  // the back of the cube toward the cream BG color, which sits naturally on
-  // top of the paper texture.
-  useEffect(() => {
-    const url     = `url(${paperTexture})`;
-    const layered = `${BG} ${url} repeat`;
-    const prevHtml = document.documentElement.style.background;
-    const prevBody = document.body.style.background;
-    document.documentElement.style.background = layered;
-    document.body.style.background            = layered;
-    return () => {
-      document.documentElement.style.background = prevHtml;
-      document.body.style.background            = prevBody;
-    };
-  }, []);
+  // The board background plate (paper texture + corner vignette) is applied
+  // directly to the root container's inline style below — see
+  // BOARD_BG_LAYERS at the top of this file. The WebGL canvas mounts above
+  // it with a transparent clear color so this stack reads through as the
+  // actual board surface.
 
   const handleRotateLeft  = () => gameRef.current?.rotateCamera('left');
   const handleRotateRight = () => gameRef.current?.rotateCamera('right');
@@ -288,7 +310,7 @@ export default function App() {
         display:        'flex',
         alignItems:     'center',
         justifyContent: 'center',
-        background:     BG,
+        ...BOARD_BG_LAYERS,
         color:          INK,
         fontFamily:     '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
         textAlign:      'center',
@@ -313,13 +335,17 @@ export default function App() {
   //
   // Root is position:fixed / inset:0 — avoids the iOS 100vh bug where the
   // browser toolbar eats into the viewport.
+  //
+  // BOARD_BG_LAYERS provides the paper-with-vignette plate. The canvas
+  // below has alpha:true and a transparent clear color (see Renderer.ts),
+  // so the paper + vignette show through as the visible board surface.
   // -------------------------------------------------------------------------
   return (
     <div style={{
       position:   'fixed',
       inset:      0,
       overflow:   'hidden',
-      background: BG,
+      ...BOARD_BG_LAYERS,
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     }}>
 
