@@ -13,6 +13,19 @@ export class Game {
   private animFrameId: number | null = null;
   private stateChangeCallback: (() => void) | null = null;
 
+  // Edge-placement sound. A single base HTMLAudioElement is preloaded; each
+  // play clones it so rapid placements can overlap without one cutting off
+  // the previous one. Volume is dialed back to ~60% so it sits under, not
+  // over, ambient room noise. Browsers may reject .play() until a user
+  // gesture has occurred, but onPlace only fires after a click/tap so a
+  // gesture is always established by the time we get here.
+  private placeSound: HTMLAudioElement = (() => {
+    const a = new Audio(`${import.meta.env.BASE_URL}sounds/edge-place.mp3`);
+    a.preload = 'auto';
+    a.volume  = 0.6;
+    return a;
+  })();
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.state = new GameState();
@@ -230,6 +243,12 @@ export class Game {
     this.inputCtrl.onPlace((placedKey, placedOwner) => {
       this.syncRendererWithState();
       this.renderer.beginEdgePlaceAnim(placedKey, placedOwner);
+      // Clone-and-play so rapid placements overlap cleanly. Cloned nodes
+      // are GC'd once playback ends. Errors (autoplay policy, decode
+      // failure) are non-fatal and silently swallowed.
+      const sfx = this.placeSound.cloneNode() as HTMLAudioElement;
+      sfx.volume = this.placeSound.volume;
+      sfx.play().catch(() => { /* ignore */ });
       this.stateChangeCallback?.();
     });
 
