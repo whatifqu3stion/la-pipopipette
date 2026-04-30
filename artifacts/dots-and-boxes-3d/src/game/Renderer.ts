@@ -11,7 +11,10 @@ const PLAYER_COLORS: Record<string, number> = {
 };
 
 const BG_COLOR      = 0xf5f0e8; // warm off-white paper
-const NEUTRAL_COLOR = 0xb8aa98; // warm gray, recedes behind player marks
+const NEUTRAL_COLOR = 0xb8aa98; // warm gray — used for corner dots
+// Neutral edge color: NEUTRAL_COLOR lerped 25% toward BG so the wires
+// between nodes recede further than the dots themselves.
+const NEUTRAL_EDGE_COLOR = 0xc7bcac;
 
 // Completed cube cage: player hue lightened ~40% toward white
 const COMPLETED_COLOR: Record<string, number> = {
@@ -25,7 +28,7 @@ const HOVER_COLOR = 0xe8a030;
 // ---------------------------------------------------------------------------
 // Geometry radii — four tiers: ghost / cage / mark / interactive
 // ---------------------------------------------------------------------------
-const RADIUS_NEUTRAL   = 0.013; // ghost structure — recedes completely
+const RADIUS_NEUTRAL   = 0.011; // ghost structure — recedes completely
 const RADIUS_COMPLETED = 0.019; // cage wire on a completed cube — visible but calm
 const RADIUS_OWNED     = 0.026; // player mark — reads clearly above neutral
 const RADIUS_HOVER     = 0.038; // hover state — unmistakably interactive
@@ -251,7 +254,7 @@ export class Renderer {
 
     // Materials
     this.matNeutral = new THREE.MeshStandardMaterial({
-      color: NEUTRAL_COLOR, roughness: 0.88, metalness: 0,
+      color: NEUTRAL_EDGE_COLOR, roughness: 0.88, metalness: 0,
     });
     this.matHover = new THREE.MeshStandardMaterial({
       color:             HOVER_COLOR,
