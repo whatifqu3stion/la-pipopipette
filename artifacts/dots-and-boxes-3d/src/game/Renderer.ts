@@ -61,8 +61,8 @@ const FACE_FILL_MS = 1000;  // face "marker stroke" fill-in duration (ms)
 // zoomed in, halo-prone when zoomed out). To match how a real lens behaves
 // (shallower DoF the closer you get to the subject), we scale aperture and
 // maxblur inversely with camera distance, anchored at DOF_REF_DIST.
-const DOF_APERTURE_BASE = 0.002975; // strength at DOF_REF_DIST (was 0.0035, -15%)
-const DOF_MAXBLUR_BASE  = 0.00765;  // cap at DOF_REF_DIST     (was 0.009,  -15%)
+const DOF_APERTURE_BASE = 0.0021;   // strength at DOF_REF_DIST (was 0.0035, -40%)
+const DOF_MAXBLUR_BASE  = 0.0054;   // cap at DOF_REF_DIST     (was 0.009,  -40%)
 const DOF_REF_DIST      = 7;      // matches CameraController ZOOM_DEFAULT
 
 // ---------------------------------------------------------------------------
@@ -1012,26 +1012,28 @@ export class Renderer {
     this.scene.add(accent);
     this.scene.add(accent.target);
 
-    // Floor "shadow" — a soft radial blob anchored under the cube center
-    // in world space. Rendered with a custom shader instead of the previous
-    // ShadowMaterial + cast-shadow setup. The previous approach projected
-    // the cube's silhouette (a square) straight down, so as the camera
-    // orbited, the shadow's square edges visibly rotated. A radial blob is
-    // rotationally symmetric, so the same view angle in any direction gives
-    // an identical shadow read — the shadow stays put under the cube and
-    // only "reacts" if the cube itself moves or scales.
+    // Floor "shadow" — a soft, axis-aligned rounded-rectangle anchored
+    // under the cube center in world space. Rendered with a custom shader
+    // instead of the previous ShadowMaterial + cast-shadow setup, which
+    // projected the cube's silhouette (a square) straight down so the
+    // shadow's edges visibly rotated as the cube spun. Here the shadow
+    // stays world-axis-aligned regardless of cube yaw, which reads correctly
+    // because the camera azimuth is fixed and the cube snaps to 90° rest
+    // positions (so the cube footprint is always axis-aligned at rest).
     //
-    // Falloff is computed in world XZ from the cube footprint center (1,1):
-    //   • full strength inside `uPlateau` (covers the structure footprint)
-    //   • smooth fade out to `uFalloff`
+    // Falloff uses a 2D rounded-box SDF centered on the cube footprint:
+    //   • inside the rounded box (signed dist <= 0): full strength
+    //   • smooth fade out over `uFalloff` units past the edge
     //   • discarded beyond, so no transparent fill cost on far pixels.
+    // `uHalfExtent` is half the cube footprint (cube spans 0..2 → 1.0).
     this.shadowFloorMat = new THREE.ShaderMaterial({
       uniforms: {
-        uColor:    { value: new THREE.Color(0x3a2d1f) }, // warm dark, matches old
-        uOpacity:  { value: SHADOW_FLOOR_OPACITY },      // tick() fades this
-        uCenter:   { value: new THREE.Vector2(1, 1) },   // structure XZ center
-        uPlateau:  { value: 1.24 },                      // full-strength radius
-        uFalloff:  { value: 2.64 },                      // outer fade radius
+        uColor:      { value: new THREE.Color(0x3a2d1f) },   // warm dark, matches old
+        uOpacity:    { value: SHADOW_FLOOR_OPACITY },        // tick() fades this
+        uCenter:     { value: new THREE.Vector2(1, 1) },     // structure XZ center
+        uHalfExtent: { value: new THREE.Vector2(1.0, 1.0) }, // half cube footprint
+        uCorner:     { value: 0.25 },                        // corner radius
+        uFalloff:    { value: 1.4 },                         // soft-edge width past box
       },
       vertexShader: /* glsl */ `
         varying vec3 vWorldPos;
@@ -1045,13 +1047,24 @@ export class Renderer {
         uniform vec3  uColor;
         uniform float uOpacity;
         uniform vec2  uCenter;
-        uniform float uPlateau;
+        uniform vec2  uHalfExtent;
+        uniform float uCorner;
         uniform float uFalloff;
         varying vec3  vWorldPos;
+
+        // Signed distance to a 2D rounded box centered at origin.
+        // Negative inside, positive outside, zero on the rounded edge.
+        float sdRoundedBox(vec2 p, vec2 b, float r) {
+          vec2 q = abs(p) - b + r;
+          return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+        }
+
         void main() {
-          float dist = length(vec2(vWorldPos.x, vWorldPos.z) - uCenter);
-          float blob = 1.0 - smoothstep(uPlateau, uFalloff, dist);
-          // Slight power curve softens the inner edge of the falloff
+          vec2  p    = vec2(vWorldPos.x, vWorldPos.z) - uCenter;
+          float dist = sdRoundedBox(p, uHalfExtent, uCorner);
+          // Inside (dist <= 0): full strength. Outside: smooth fade.
+          float blob = 1.0 - smoothstep(0.0, uFalloff, dist);
+          // Slight power curve softens the outer falloff
           blob = pow(blob, 1.4);
           if (blob < 0.001) discard;
           gl_FragColor = vec4(uColor, blob * uOpacity);
