@@ -461,8 +461,8 @@ export class Renderer {
     // appears as a visible surface.  Sits 1.5 units below the cube's
     // bottom face — well outside the gameplay reading area.
     this.shadowFloorMat = new THREE.ShadowMaterial({
-      color:   0x3a2d1f, // warm dark — sits naturally on warm paper bg
-      opacity: 0.16,
+      color:   0x3a2d1f,            // warm dark — sits naturally on warm paper bg
+      opacity: SHADOW_FLOOR_OPACITY, // tick() fades from this baseline
     });
     this.shadowFloorMat.transparent = true;
     this.shadowFloor = new THREE.Mesh(
