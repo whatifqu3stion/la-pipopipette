@@ -46,7 +46,7 @@ const RADIUS_POINT     = 0.038; // corner dots — anchor the grid
 // ---------------------------------------------------------------------------
 // Animation timings
 // ---------------------------------------------------------------------------
-const EDGE_ANIM_MS = 840;  // edge draw-in duration (ms) — paced like a hand stroke
+const EDGE_ANIM_MS = 1000; // edge draw-in duration (ms) — paced like a hand stroke
 const EDGE_GLOW_MS = 350;  // post-draw emphasis duration (ms)
 const CUBE_ANIM_MS = 400;  // cube scale-in duration (ms)
 
