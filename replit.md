@@ -37,7 +37,7 @@ See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and pa
   - `src/game/GameModel.ts` — Pure data model: grid building, adjacency logic, gravity support
   - `src/game/GameState.ts` — Game logic: turn management, scoring, undo, event system
   - `src/game/Renderer.ts` — Three.js scene: points, edges (with hit zones), faces, cubes
-  - `src/game/CameraController.ts` — Fixed isometric camera with 90° rotation + overshoot animation
+  - `src/game/CameraController.ts` — Fixed 3/4-view camera; tracks cube turntable yaw with 90° snap + overshoot
   - `src/game/InputController.ts` — Mouse/touch raycast input handling
   - `src/game/Game.ts` — Orchestrator tying all modules together
   - `src/App.tsx` — React shell with HTML/CSS UI overlay (scores, turn indicator, buttons)

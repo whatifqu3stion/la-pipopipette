@@ -98,10 +98,12 @@ export class Game {
         this.renderer.setHoveredEdge(null);
       }
       if (mouseDragging) {
-        // Horizontal drag → azimuth; vertical drag → elevation.
-        // Negate dy so dragging DOWN tilts the camera down (revealing the top face).
+        // Turntable mode: horizontal drag spins the cube on its vertical
+        // axis. Vertical drag is intentionally ignored — the ground/shadow
+        // stay anchored at the bottom of the screen.
         this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
-        this.cameraCtrl.dragByVertical(-dy * DRAG_FACTOR);
+        // Suppress unused-vertical-delta warning without touching the var.
+        void dy;
       } else {
         this.inputCtrl.handleMove(e.clientX, e.clientY);
       }
@@ -188,10 +190,10 @@ export class Game {
           this.renderer.setHoveredEdge(null);
         }
         if (touchDragging) {
-          // Horizontal drag → azimuth; vertical drag → elevation.
-          // Negate dy so dragging DOWN tilts the camera down (revealing the top face).
+          // Turntable mode: horizontal drag spins the cube on its vertical
+          // axis. Vertical drag is intentionally ignored.
           this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
-          this.cameraCtrl.dragByVertical(-dy * DRAG_FACTOR);
+          void dy;
         } else {
           this.inputCtrl.handleMove(t.clientX, t.clientY);
         }
@@ -263,7 +265,11 @@ export class Game {
 
   private startLoop() {
     const loop = (now: number) => {
+      // Update tween state (button rotations and snap-back animations).
       this.cameraCtrl.update(now);
+      // Push the latest cube yaw into the renderer so the turntable group
+      // reflects this frame's rotation before render.
+      this.renderer.setCubeYaw(this.cameraCtrl.getCubeYaw());
       this.renderer.tick(now);
       this.animFrameId = requestAnimationFrame(loop);
     };
@@ -304,6 +310,10 @@ export class Game {
   reset() {
     this.state.reset();
     this.cameraCtrl.reset();
+    // Apply the reset yaw immediately so the cube snaps back to its home
+    // orientation on the same frame as the rest of the reset, instead of
+    // the next render loop tick.
+    this.renderer.setCubeYaw(this.cameraCtrl.getCubeYaw());
     this.renderer.clearLastPlaced();
     this.syncRendererWithState();
     this.stateChangeCallback?.();

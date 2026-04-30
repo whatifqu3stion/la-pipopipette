@@ -557,6 +557,26 @@ export class Renderer {
   // Camera-relative rim/back light (position updated every frame)
   private rimLight!: THREE.DirectionalLight;
 
+  // ── Turntable rotation ────────────────────────────────────────────────
+  // All cube content (dots, edges, hit meshes, faces, cubes, in-flight
+  // pen-stroke sparks) lives inside cubeContent, which is parented to
+  // cubePivot. Rotating cubePivot.rotation.y spins the cube around its
+  // own vertical center axis while the camera, lights, fog, and shadow
+  // floor stay anchored in world space — giving a turntable feel where
+  // the ground and shadow stay put while only the cube turns.
+  //
+  // Two-group layout so existing child positions (which are in world
+  // coords like (1,1,1) for the cube center) don't have to be rewritten
+  // to be pivot-local:
+  //   • cubePivot is positioned at the cube center (1,1,1). This is
+  //     where rotation happens, so spinning is around the cube's center.
+  //   • cubeContent is offset by (-1,-1,-1) inside cubePivot, cancelling
+  //     the pivot's translation. A child added with its original world
+  //     position (e.g. an edge whose midpoint sits at (0,0,0)) ends up
+  //     exactly where it was before through the two transforms.
+  private cubePivot!: THREE.Group;
+  private cubeContent!: THREE.Group;
+
   // Invisible floor plane that receives the accent-light shadow.  Its
   // opacity is faded out per-frame in tick() when the camera tilts below
   // the cube so the plane never appears as a visible rectangle.
@@ -606,6 +626,17 @@ export class Renderer {
     // fade always wraps the cube no matter how far the user has zoomed in.
     this.scene.fog        = new THREE.Fog(BG_COLOR, 5, 9);
     this.scene.background = new THREE.Color(BG_COLOR);
+
+    // Turntable groups — see field declaration above for the two-group
+    // rationale. Created before initPoints/initEdges/initFaces/initCubes
+    // (which add their meshes into cubeContent rather than scene).
+    this.cubePivot = new THREE.Group();
+    this.cubePivot.position.set(1, 1, 1);
+    this.scene.add(this.cubePivot);
+
+    this.cubeContent = new THREE.Group();
+    this.cubeContent.position.set(-1, -1, -1);
+    this.cubePivot.add(this.cubeContent);
 
     const w = canvas.clientWidth  || canvas.width  || 800;
     const h = canvas.clientHeight || canvas.height || 600;
@@ -924,7 +955,9 @@ export class Renderer {
       // Cast onto the implied floor — receiveShadow stays off so dots never
       // self-shadow against each other or against neighboring edges.
       mesh.castShadow = true;
-      this.scene.add(mesh);
+      // Cube content lives inside the rotating cubeContent group so it
+      // spins with the turntable while lights/shadow stay in world space.
+      this.cubeContent.add(mesh);
       this.dotGeometries.push(ink.geo);
     }
   }
@@ -938,8 +971,10 @@ export class Renderer {
       this.edgeMeshes.set(key, mesh);
       this.edgeHitMeshes.set(key, hitMesh);
       this.edgeSketches.set(key, sketch);
-      this.scene.add(mesh);
-      this.scene.add(hitMesh);
+      // Add to the rotating cubeContent group, not the scene root, so the
+      // edges turn with the rest of the cube during turntable rotation.
+      this.cubeContent.add(mesh);
+      this.cubeContent.add(hitMesh);
     }
   }
 
@@ -1025,7 +1060,8 @@ export class Renderer {
       else if (normal === 'y') mesh.rotation.x = Math.PI / 2;
 
       this.faceMeshes.set(key, mesh);
-      this.scene.add(mesh);
+      // Faces rotate with the cube on the turntable group.
+      this.cubeContent.add(mesh);
     }
   }
 
@@ -1038,7 +1074,8 @@ export class Renderer {
       mesh.renderOrder = 2;
       mesh.position.set(cube.origin.x + 0.5, cube.origin.y + 0.5, cube.origin.z + 0.5);
       this.cubeMeshes.set(key, mesh);
-      this.scene.add(mesh);
+      // Cube fills rotate with the turntable group.
+      this.cubeContent.add(mesh);
     }
   }
 
@@ -1178,7 +1215,7 @@ export class Renderer {
     // Cancel any previous animation on this key
     const prev = this.edgeAnims.get(key);
     if (prev) {
-      this.scene.remove(prev.highlight);
+      this.cubeContent.remove(prev.highlight);
       // Restore drawRange on whatever geometry the previous anim was using
       prev.sketch.geoOwned.drawRange.count = Infinity;
       // Free the previous anim's cloned material so it doesn't leak GPU resources
@@ -1204,7 +1241,9 @@ export class Renderer {
       owner === 'A' ? this.matHighlightA : this.matHighlightB,
     );
     highlight.position.copy(sketch.startPos);
-    this.scene.add(highlight);
+    // Spark rides on the rotating cube — add to cubeContent so it spins
+    // with the stroke instead of slipping off as the cube turns.
+    this.cubeContent.add(highlight);
 
     this.edgeAnims.set(key, {
       owner,
@@ -1223,7 +1262,7 @@ export class Renderer {
     // Also dispose each anim's per-edge cloned glow material — updateEdgeStates
     // will assign a fresh shared material on the next frame.
     for (const [, anim] of this.edgeAnims) {
-      this.scene.remove(anim.highlight);
+      this.cubeContent.remove(anim.highlight);
       anim.sketch.geoOwned.drawRange.start = 0;
       anim.sketch.geoOwned.drawRange.count = Infinity;
       anim.mat.dispose();
@@ -1234,6 +1273,13 @@ export class Renderer {
   }
 
   raycastEdge(ndc: THREE.Vector2): string | null {
+    // Hit meshes live inside cubeContent (which lives inside cubePivot),
+    // so their world matrices depend on cubePivot.rotation.y. A click can
+    // arrive between a rotation update and the next render, so force a
+    // matrix refresh from the pivot down before raycasting — otherwise
+    // the raycaster would see stale (pre-rotation) hit cylinder positions
+    // and pick the wrong edge while the cube is being dragged.
+    this.cubePivot.updateMatrixWorld(true);
     this.raycaster.setFromCamera(ndc, this.camera);
     const hits = this.raycaster.intersectObjects(Array.from(this.edgeHitMeshes.values()));
     for (const hit of hits) {
@@ -1241,6 +1287,15 @@ export class Renderer {
       if (this.validEdgeKeys.has(key)) return key;
     }
     return null;
+  }
+
+  /**
+   * Set the turntable yaw — the cube spins around its vertical center
+   * axis by this angle (radians). Driven by CameraController.getCubeYaw()
+   * each frame from Game's loop. Camera, lights, and shadow stay put.
+   */
+  setCubeYaw(yaw: number) {
+    this.cubePivot.rotation.y = yaw;
   }
 
   // ---------------------------------------------------------------------------
@@ -1296,7 +1351,7 @@ export class Renderer {
           // than "geometry replaced".
           anim.sketch.geoOwned.drawRange.count = Infinity;
           mesh.geometry = this.geoStraightOwned;
-          this.scene.remove(anim.highlight);
+          this.cubeContent.remove(anim.highlight);
           anim.mat.emissiveIntensity = GLOW_INTENSITY_PEAK;
           anim.snapTime = now;
           // For other systems that key off "the most recently placed edge"
@@ -1404,7 +1459,7 @@ export class Renderer {
 
   dispose() {
     for (const anim of this.edgeAnims.values()) {
-      this.scene.remove(anim.highlight);
+      this.cubeContent.remove(anim.highlight);
       anim.mat.dispose();
     }
     this.edgeAnims.clear();
