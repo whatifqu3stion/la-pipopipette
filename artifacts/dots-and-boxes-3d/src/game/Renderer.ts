@@ -809,18 +809,16 @@ export class Renderer {
     );
 
     // Materials
-    // Neutral (unplayed) edges use a lit, very matte material with mild
-    // transparency. Front-facing edges pick up the warm key light and read
-    // crisply; back-facing edges receive only hemisphere light AND get
-    // dimmed by scene fog (see fog setup) — together producing strong
-    // depth separation without changing thickness.
+    // Neutral (unplayed) edges use a lit, very matte material. Front-facing
+    // edges pick up the warm key light and read crisply; back-facing edges
+    // receive only hemisphere light AND get dimmed by scene fog (see fog
+    // setup) — together producing strong depth separation without changing
+    // thickness. Fully opaque so the grid reads as solid lines and players
+    // can clearly see which edges are still unplayed.
     this.matNeutral = new THREE.MeshStandardMaterial({
-      color:       NEUTRAL_EDGE_COLOR,
-      roughness:   0.95,
-      metalness:   0,
-      transparent: true,
-      opacity:     0.85,
-      depthWrite:  false,
+      color:     NEUTRAL_EDGE_COLOR,
+      roughness: 0.95,
+      metalness: 0,
     });
     this.matHover = new THREE.MeshStandardMaterial({
       color:             HOVER_COLOR,
