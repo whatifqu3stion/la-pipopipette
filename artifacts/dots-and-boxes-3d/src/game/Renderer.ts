@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass }     from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass }     from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { BokehPass }      from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { OutputPass }     from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { edgeKey, faceKey, cubeKey } from './GameModel';
@@ -63,6 +64,122 @@ const FACE_FILL_MS = 800;  // face "marker stroke" fill-in duration (ms)
 const DOF_APERTURE_BASE = 0.0035; // strength at DOF_REF_DIST
 const DOF_MAXBLUR_BASE  = 0.009;  // cap at DOF_REF_DIST
 const DOF_REF_DIST      = 7;      // matches CameraController ZOOM_DEFAULT
+
+// ---------------------------------------------------------------------------
+// Atmosphere pass — paper / risograph feel
+//
+// A single full-screen ShaderPass applied AFTER BokehPass and BEFORE
+// OutputPass (so the linear→sRGB conversion stays last) layers four cheap
+// effects onto the composited frame:
+//
+//   1. Paper-light unevenness — low-frequency fbm * gentle ±N% multiplier,
+//      static (no time) so it reads as baked paper character, not flicker.
+//   2. Vignette                — smooth radial darkening from screen center.
+//   3. Warmth tint             — multiplicative shift toward warm cream.
+//   4. Grain                   — per-pixel hash, monochromatic, static.
+//
+// All four strengths are uniforms driven from React via setAtmosphereParams,
+// so values can be tuned live without recompiling. Defaults are intentionally
+// strong enough to be obviously visible during testing — see the
+// ATMOSPHERE_DEFAULTS export consumed by App.tsx for the numbers.
+// ---------------------------------------------------------------------------
+export interface AtmosphereParams {
+  grainStrength:       number;  // 0..0.3 sensible
+  vignetteStrength:    number;  // 0..1
+  paperLightStrength:  number;  // 0..0.5
+  warmthAmount:        number;  // 0..1 (0 = none, 1 = full warm-tint multiply)
+}
+
+export const ATMOSPHERE_DEFAULTS: AtmosphereParams = {
+  grainStrength:      0.10,
+  vignetteStrength:   0.45,
+  paperLightStrength: 0.18,
+  warmthAmount:       0.30,
+};
+
+const ATMOSPHERE_SHADER = {
+  uniforms: {
+    tDiffuse:           { value: null as THREE.Texture | null },
+    uResolution:        { value: new THREE.Vector2(1, 1) },
+    uGrainStrength:     { value: ATMOSPHERE_DEFAULTS.grainStrength },
+    uVignetteStrength:  { value: ATMOSPHERE_DEFAULTS.vignetteStrength },
+    uPaperLightStrength:{ value: ATMOSPHERE_DEFAULTS.paperLightStrength },
+    uWarmthAmount:      { value: ATMOSPHERE_DEFAULTS.warmthAmount },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform vec2  uResolution;
+    uniform float uGrainStrength;
+    uniform float uVignetteStrength;
+    uniform float uPaperLightStrength;
+    uniform float uWarmthAmount;
+    varying vec2 vUv;
+
+    // Cheap deterministic 2D hash → [0,1).
+    float hash21(vec2 p) {
+      p = fract(p * vec2(443.8975, 397.2973));
+      p += dot(p, p + 19.19);
+      return fract(p.x * p.y);
+    }
+
+    // Smooth value noise (cubic interp).
+    float vnoise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      vec2 u = f * f * (3.0 - 2.0 * f);
+      float a = hash21(i);
+      float b = hash21(i + vec2(1.0, 0.0));
+      float c = hash21(i + vec2(0.0, 1.0));
+      float d = hash21(i + vec2(1.0, 1.0));
+      return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    }
+
+    // 4-octave fbm for low-frequency paper-light variation.
+    float fbm(vec2 p) {
+      float v = 0.0;
+      float a = 0.5;
+      for (int i = 0; i < 4; ++i) {
+        v += a * vnoise(p);
+        p *= 2.0;
+        a *= 0.5;
+      }
+      return v;
+    }
+
+    void main() {
+      vec3 col = texture2D(tDiffuse, vUv).rgb;
+
+      // 1. Paper light unevenness (multiplicative, ±strength/2).
+      float light = fbm(vUv * 2.5);                       // ~0..1
+      col *= 1.0 + (light - 0.5) * uPaperLightStrength;
+
+      // 2. Vignette: smooth radial darken from center.
+      //    distance is normalised so corners reach 1.0 (sqrt(0.5²+0.5²)*√2).
+      float dist = length(vUv - 0.5) * 1.41421356;        // 0 center → 1 corner
+      float vig  = smoothstep(0.55, 1.05, dist) * uVignetteStrength;
+      col *= 1.0 - vig;
+
+      // 3. Warmth tint: shift toward warm cream by lerp(col, col*tint, t).
+      vec3 warmTint = vec3(1.04, 1.005, 0.93);
+      col = mix(col, col * warmTint, uWarmthAmount);
+
+      // 4. Grain: 2 CSS-pixel cells of monochrome noise, static (no time)
+      //    so it reads as paper grain rather than film flicker.
+      vec2 grainCell = floor(vUv * uResolution * 0.5);
+      float g = hash21(grainCell) - 0.5;
+      col += g * uGrainStrength;
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+};
 
 // Glow swell that masks the wavy → straight geometry snap.
 // During the last (1 - GLOW_SWELL_START_FRAC) of the draw, the stroke's
@@ -625,6 +742,7 @@ export class Renderer {
   // to follow the camera's distance to the cube center, so the focal plane
   // sits on the cube no matter how far in/out the user has zoomed.
   private composer!: EffectComposer;
+  private atmospherePass!: ShaderPass;
   private bokehPass!: BokehPass;
   private composerTarget!: THREE.WebGLRenderTarget;
 
@@ -851,9 +969,33 @@ export class Renderer {
     (this.bokehPass.uniforms as Record<string, THREE.IUniform>).aspect.value = w / h;
     this.composer.addPass(this.bokehPass);
 
+    // Atmosphere — paper-grain + vignette + uneven paper light + warm tint
+    // applied as a single full-screen shader. Sits AFTER bokeh so the blur
+    // is still applied to scene depth, but BEFORE OutputPass so the linear
+    // → sRGB conversion remains the very last step.
+    this.atmospherePass = new ShaderPass(ATMOSPHERE_SHADER);
+    (this.atmospherePass.uniforms as Record<string, THREE.IUniform>)
+      .uResolution.value.set(w, h);
+    this.composer.addPass(this.atmospherePass);
+
     // Linear → sRGB conversion (required when going through postprocessing
     // since intermediate buffers are linear-space).
     this.composer.addPass(new OutputPass());
+  }
+
+  // ---------------------------------------------------------------------------
+  // Atmosphere tuning — called from React via Game.setAtmosphereParams when
+  // the user moves a slider in the in-app tuning panel. Each field is
+  // optional so partial updates work; missing fields keep their current
+  // uniform value.
+  // ---------------------------------------------------------------------------
+  setAtmosphereParams(params: Partial<AtmosphereParams>) {
+    if (!this.atmospherePass) return;
+    const u = this.atmospherePass.uniforms as Record<string, THREE.IUniform>;
+    if (params.grainStrength      !== undefined) u.uGrainStrength.value      = params.grainStrength;
+    if (params.vignetteStrength   !== undefined) u.uVignetteStrength.value   = params.vignetteStrength;
+    if (params.paperLightStrength !== undefined) u.uPaperLightStrength.value = params.paperLightStrength;
+    if (params.warmthAmount       !== undefined) u.uWarmthAmount.value       = params.warmthAmount;
   }
 
   // ---------------------------------------------------------------------------
@@ -1543,6 +1685,12 @@ export class Renderer {
       this.composer.setSize(width, height);
       (this.bokehPass.uniforms as Record<string, THREE.IUniform>).aspect.value =
         width / height;
+      // Atmosphere shader uses uResolution to scale grain cells in CSS-pixel
+      // space; without this the grain would stretch on resize.
+      if (this.atmospherePass) {
+        (this.atmospherePass.uniforms as Record<string, THREE.IUniform>)
+          .uResolution.value.set(width, height);
+      }
     }
   }
 
@@ -1566,6 +1714,11 @@ export class Renderer {
     this.dotGeometries.length = 0;
     this.shadowFloor.geometry.dispose();
     this.shadowFloorMat.dispose();
+    // Postprocessing resources — without these the atmosphere ShaderPass'
+    // material and the composer's internal RTs leak GPU memory across
+    // remounts (notably under React StrictMode in dev).
+    this.atmospherePass?.material.dispose();
+    this.composer?.dispose();
     this.composerTarget?.dispose();
     this.renderer.dispose();
   }

@@ -1,5 +1,5 @@
 import { GameState } from './GameState';
-import { Renderer } from './Renderer';
+import { Renderer, type AtmosphereParams } from './Renderer';
 import { CameraController } from './CameraController';
 import { InputController } from './InputController';
 import { buildPoints, edgeKey, getCubeEdges } from './GameModel';
@@ -332,6 +332,12 @@ export class Game {
 
   getWinner() {
     return this.state.getWinner();
+  }
+
+  // Forward atmosphere-pass tuning to the renderer. Called from React when
+  // the user moves a slider in the in-app tuning panel.
+  setAtmosphereParams(params: Partial<AtmosphereParams>) {
+    this.renderer.setAtmosphereParams(params);
   }
 
   dispose() {

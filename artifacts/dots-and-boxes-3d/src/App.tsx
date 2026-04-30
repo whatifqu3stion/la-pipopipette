@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from './game/Game';
 import type { Owner } from './game/types';
+import { ATMOSPHERE_DEFAULTS, type AtmosphereParams } from './game/Renderer';
 import paperCrumpleOverlay from '@assets/white-paper-texture_1777522901345.jpg';
 
 // Player colors — matched to the in-game palette in Renderer.ts so the UI
@@ -44,43 +45,20 @@ const BOARD_BG_LAYERS: React.CSSProperties = {
 };
 
 // ---------------------------------------------------------------------------
-// Procedural grain overlay
+// Atmosphere effect
 //
-// A barely-there risograph-style grain that sits OVER the final composite
-// (canvas + crumple overlay) but UNDER the UI controls, giving the whole
-// view a touch of light variation and paper tooth without distorting the
-// gameplay objects themselves.
+// The previous SVG turbulence overlay (DOM <div> with mix-blend-mode: soft-
+// light) has been replaced by a single full-screen WebGL shader pass that
+// runs INSIDE the postprocessing pipeline (see ATMOSPHERE_SHADER in
+// Renderer.ts). That single pass layers four effects together — paper grain,
+// vignette, uneven paper light, and a warm-cream tint — which is more
+// visually convincing than a single turbulence tile and is also live-tunable
+// from the React side via Game.setAtmosphereParams.
 //
-// Implementation: an inline SVG `feTurbulence` filter rasterised once by
-// the browser and tiled across the viewport. No external image asset, no
-// shader pass, no library — the simplest possible thing that works. Cost
-// is essentially a single small tiled image, GPU-composited.
-//
-// Layering: zIndex 3 (above crumple overlay at zIndex 2, below UI at 10+).
-// `mix-blend-mode: soft-light` keeps it as a light/dark modulation rather
-// than a flat tint, so colors below stay correct.
+// The 4 strengths default to ATMOSPHERE_DEFAULTS (intentionally strong so
+// the effect is obviously visible during testing), and are exposed through
+// the small collapsible "Atmosphere" tuning panel in the bottom of the JSX.
 // ---------------------------------------------------------------------------
-const GRAIN_ENABLED = true; // single switch to disable the effect entirely
-
-// Tiled procedural noise. baseFrequency tuned for a fine paper-tooth grain
-// (higher = finer); the alpha row in feColorMatrix sets per-pixel intensity
-// before we layer-opacity it down to "barely there".
-const GRAIN_SVG =
-  "<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'>" +
-    "<filter id='n'>" +
-      "<feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/>" +
-      "<feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/>" +
-    "</filter>" +
-    "<rect width='100%' height='100%' filter='url(%23n)'/>" +
-  "</svg>";
-const GRAIN_URL = `url("data:image/svg+xml;utf8,${encodeURIComponent(GRAIN_SVG)}")`;
-
-// Soft perf guard: on devices reporting few logical cores (typical of
-// low-end phones), drop opacity to ~half. The actual GPU cost of a single
-// tiled image is negligible, but per the request we keep a knob.
-const IS_LOW_END_DEVICE =
-  typeof navigator !== 'undefined' && (navigator.hardwareConcurrency ?? 8) <= 4;
-const GRAIN_OPACITY = GRAIN_ENABLED ? (IS_LOW_END_DEVICE ? 0.045 : 0.085) : 0;
 
 // Safe-area-aware padding helpers (CSS calc strings)
 const safeTop    = 'calc(env(safe-area-inset-top, 0px) + 12px)';
@@ -253,6 +231,118 @@ function GameOverBanner({
 }
 
 // ---------------------------------------------------------------------------
+// AtmospherePanel
+//
+// Small collapsible floating panel pinned to the bottom-left of the viewport
+// (well clear of the right-edge Vibe Jam tab) with one labelled slider per
+// atmosphere uniform. Each slider's onChange does two things:
+//   1. updates local React state (so the value display re-renders), and
+//   2. calls onChange(field, value) which the parent App forwards to
+//      Game.setAtmosphereParams — pushing the new value straight to the
+//      shader uniform, no re-render of the canvas required.
+//
+// The panel is collapsed-by-default so it doesn't compete with the gameplay
+// once the user has finished tuning; tap the "Atmosphere" header to open.
+// ---------------------------------------------------------------------------
+function AtmospherePanel({
+  values, onChange,
+}: {
+  values:   AtmosphereParams;
+  onChange: <K extends keyof AtmosphereParams>(key: K, value: AtmosphereParams[K]) => void;
+}) {
+  const [open, setOpen] = useState(true);
+
+  // Per-slider tuning ranges. Max is set to roughly "obvious enough that
+  // pushing this slider all the way is a clearly bad value", so the useful
+  // range covers the lower-half of the bar.
+  const sliders: Array<{
+    key:   keyof AtmosphereParams;
+    label: string;
+    max:   number;
+    step:  number;
+  }> = [
+    { key: 'grainStrength',      label: 'Grain',         max: 0.30, step: 0.005 },
+    { key: 'vignetteStrength',   label: 'Vignette',      max: 1.00, step: 0.01  },
+    { key: 'paperLightStrength', label: 'Paper Light',   max: 0.50, step: 0.005 },
+    { key: 'warmthAmount',       label: 'Warmth',        max: 1.00, step: 0.01  },
+  ];
+
+  return (
+    <div style={{
+      position:      'absolute',
+      left:          12,
+      bottom:        92,    // sits clear of the bottom button row
+      zIndex:        11,    // above the bottom-bar gradient (zIndex 10)
+      width:         220,
+      borderRadius:  10,
+      background:    'rgba(245,240,232,0.92)',
+      border:        `1px solid ${INK_FAINT}`,
+      boxShadow:     '0 4px 14px rgba(44,26,14,0.10)',
+      fontSize:      11,
+      color:         INK,
+      backdropFilter: 'blur(4px)' as React.CSSProperties['backdropFilter'],
+      pointerEvents: 'auto',
+    }}>
+      {/* Header / collapse toggle */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        aria-controls="atmosphere-panel-body"
+        style={{
+          width:        '100%',
+          display:      'flex',
+          alignItems:   'center',
+          justifyContent: 'space-between',
+          padding:      '8px 12px',
+          background:   'transparent',
+          border:       'none',
+          color:        INK_MED,
+          fontSize:     10,
+          fontWeight:   700,
+          letterSpacing:'0.10em',
+          textTransform:'uppercase',
+          cursor:       'pointer',
+          fontFamily:   'inherit',
+        }}
+      >
+        <span>Atmosphere</span>
+        <span aria-hidden="true" style={{ fontSize: 12 }}>{open ? '▾' : '▸'}</span>
+      </button>
+
+      {open && (
+        <div
+          id="atmosphere-panel-body"
+          style={{ padding: '4px 12px 12px', display: 'flex', flexDirection: 'column', gap: 9 }}
+        >
+          {sliders.map(({ key, label, max, step }) => {
+            const v = values[key];
+            return (
+              <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: INK_MED }}>{label}</span>
+                  <span style={{ color: INK, fontVariantNumeric: 'tabular-nums' }}>
+                    {v.toFixed(3)}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={max}
+                  step={step}
+                  value={v}
+                  onChange={e => onChange(key, parseFloat(e.target.value))}
+                  style={{ width: '100%', accentColor: INK }}
+                />
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 export default function App() {
@@ -266,6 +356,19 @@ export default function App() {
     winner:        null,
     canUndo:       false,
   });
+
+  // Atmosphere shader-pass tuning state. The defaults are imported from
+  // Renderer.ts so React UI and shader uniforms always agree on the
+  // initial values. Slider changes flow into Game.setAtmosphereParams
+  // which writes straight to the uniforms (no canvas re-render needed).
+  const [atmosphere, setAtmosphere] = useState<AtmosphereParams>(ATMOSPHERE_DEFAULTS);
+  const handleAtmosphereChange = useCallback(
+    <K extends keyof AtmosphereParams>(key: K, value: AtmosphereParams[K]) => {
+      setAtmosphere(prev => ({ ...prev, [key]: value }));
+      gameRef.current?.setAtmosphereParams({ [key]: value });
+    },
+    [],
+  );
 
   const syncUI = useCallback(() => {
     const game = gameRef.current;
@@ -292,8 +395,17 @@ export default function App() {
     }
     gameRef.current = game;
     game.setStateChangeCallback(syncUI);
+    // Replay current atmosphere state into the freshly-constructed Renderer so
+    // any slider movement that happened before Game init (or after StrictMode
+    // remount) is reflected in the shader uniforms — otherwise the UI would
+    // silently disagree with the rendered output.
+    game.setAtmosphereParams(atmosphere);
     syncUI();
     return () => { game.dispose(); gameRef.current = null; };
+    // atmosphere is intentionally NOT in the dep array — slider changes are
+    // pushed via handleAtmosphereChange directly and re-running this effect
+    // would tear down and rebuild the entire WebGL context on every drag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncUI]);
 
   // The board background plate (a flat cream base color) is applied
@@ -416,26 +528,13 @@ export default function App() {
         }}
       />
 
-      {/* ── Procedural grain overlay ──
-           Inline SVG turbulence pattern tiled across the viewport. Sits
-           above the crumple overlay (zIndex 2) and below the UI (zIndex
-           10+) so gameplay stays crisp. See the GRAIN_* constants above
-           for the toggle / opacity tuning. */}
-      {GRAIN_OPACITY > 0 && (
-        <div
-          aria-hidden="true"
-          style={{
-            position:         'absolute',
-            inset:            0,
-            pointerEvents:    'none',
-            zIndex:           3,
-            backgroundImage:  GRAIN_URL,
-            backgroundRepeat: 'repeat',
-            backgroundSize:   '240px 240px',
-            opacity:          GRAIN_OPACITY,
-            mixBlendMode:     'soft-light' as React.CSSProperties['mixBlendMode'],
-          }}
-        />
+      {/* The previous SVG turbulence grain overlay was removed. Grain is now
+          part of the Atmosphere shader pass (Renderer.ts), so it composites
+          INSIDE the WebGL pipeline alongside the cube, rather than sitting
+          on top of the canvas as an HTML layer. The collapsible
+          AtmospherePanel below pushes live values into those uniforms. */}
+      {!webglError && (
+        <AtmospherePanel values={atmosphere} onChange={handleAtmosphereChange} />
       )}
 
       {/* ── TOP BAR ── */}
