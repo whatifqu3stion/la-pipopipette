@@ -915,9 +915,29 @@ export class Renderer {
     depthTexture.type   = THREE.UnsignedShortType;
     depthTexture.format = THREE.DepthFormat;
 
+    // Feature-detect the high-quality target combo (MSAA + half-float color
+    // + sampleable depth). Many mobile WebViews — including the system
+    // WebView wrapping the Replit mobile app — don't support color-renderable
+    // half-float attachments and/or can't combine MSAA color renderbuffers
+    // with a sampleable DepthTexture. In those cases the framebuffer
+    // becomes incomplete, three.js silently renders nothing, and the user
+    // sees a blank background with no cube. So we degrade to the
+    // universally-supported configuration on devices that can't handle the
+    // high-quality path: edges are jaggier (no MSAA) and the bokeh blur can
+    // band slightly (8-bit color), but the scene actually renders.
+    const gl = this.renderer.getContext();
+    const isWebGL2 =
+      typeof WebGL2RenderingContext !== 'undefined' &&
+      gl instanceof WebGL2RenderingContext;
+    const supportsHalfFloatColor = !!(
+      gl.getExtension('EXT_color_buffer_half_float') ||
+      gl.getExtension('EXT_color_buffer_float')
+    );
+    const useHQ = isWebGL2 && supportsHalfFloatColor;
+
     this.composerTarget = new THREE.WebGLRenderTarget(tw, th, {
-      samples:      4,
-      type:         THREE.HalfFloatType,
+      samples:      useHQ ? 4 : 0,
+      type:         useHQ ? THREE.HalfFloatType : THREE.UnsignedByteType,
       depthTexture,
     });
     this.composer = new EffectComposer(this.renderer, this.composerTarget);
