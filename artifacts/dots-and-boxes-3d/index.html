@@ -18,6 +18,13 @@
       // fetch to vibej.am) is independent of these visual styles, so we
       // only touch positioning/transform — never the link target, the
       // listeners, or the script itself.
+      //
+      // Detection strategy: a MutationObserver on <body> waits indefin-
+      // itely for the anchor to appear. This survives slow networks /
+      // throttled tabs / async-script-loaded-after-DCL, where a fixed
+      // polling timeout would otherwise miss the anchor and leave the
+      // badge stuck in its default bottom-right position (where it can
+      // be covered by other UI).
       (function () {
         var anchor = null;
         function applyStyles() {
@@ -39,34 +46,47 @@
           s.setProperty('left',             'auto',                                 'important');
           s.setProperty('transform-origin', 'center center',                        'important');
           s.setProperty('transform',        'translateY(-50%) rotate(-90deg)',      'important');
+          // Force-stack above any in-app overlay (grain/crumple sit at
+          // zIndex 2-3, UI at 10+; max-int here guarantees the badge
+          // can never be covered by future layers).
+          s.setProperty('z-index',          '2147483647',                           'important');
           // After -90° rotation the original BOTTOM edge becomes the
           // visible left side of the vertical tab (the side that pokes
           // into the canvas, away from the screen edge). Round those two
           // corners; leave the now-visible right side flush.
           s.setProperty('border-radius',    '0 0 12px 12px',                        'important');
         }
-        // Cap polling so we don't churn forever if the widget script is
-        // blocked (e.g., by an adblocker). 60 attempts × 50 ms = ~3 s.
-        var attempts = 0;
-        function findAnchor() {
-          anchor = document.querySelector('a[href="https://vibej.am/"]');
-          if (anchor) {
-            applyStyles();
-            // Re-measure on viewport changes so the right-edge flush
-            // stays correct under resize / orientation change.
-            var raf = 0;
-            window.addEventListener('resize', function () {
-              if (raf) return;
-              raf = requestAnimationFrame(function () { raf = 0; applyStyles(); });
-            });
-            return;
-          }
-          if (++attempts < 60) setTimeout(findAnchor, 50);
+        function bindResize() {
+          // Re-measure on viewport changes so the right-edge flush stays
+          // correct under resize / orientation change / device rotation.
+          var raf = 0;
+          window.addEventListener('resize', function () {
+            if (raf) return;
+            raf = requestAnimationFrame(function () { raf = 0; applyStyles(); });
+          });
+        }
+        function tryClaim() {
+          var a = document.querySelector('a[href="https://vibej.am/"]');
+          if (!a) return false;
+          anchor = a;
+          applyStyles();
+          bindResize();
+          return true;
+        }
+        function init() {
+          if (tryClaim()) return;
+          // Anchor not in DOM yet — watch for it. We observe <body>
+          // (where the widget appends) for added subtrees and re-check
+          // on each batch. Disconnect the moment we find it.
+          var obs = new MutationObserver(function () {
+            if (tryClaim()) obs.disconnect();
+          });
+          obs.observe(document.body, { childList: true, subtree: true });
         }
         if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', findAnchor);
+          document.addEventListener('DOMContentLoaded', init);
         } else {
-          findAnchor();
+          init();
         }
       })();
     </script>
