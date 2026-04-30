@@ -91,10 +91,33 @@ function easeOutBack(t: number): number {
 // • One curve per edge, four TubeGeometries per edge (one per tier radius).
 //   The four tiers share the same wavy path so swapping geometry only
 //   changes thickness, never silhouette.
+// • After construction, every owned/completed/settled tube is post-processed
+//   by applyEdgeTaper() which (a) pinches the ends toward zero radius for a
+//   tapered "pen tip" look and (b) bakes a subtle per-ring brightness
+//   variation into a vertex-color attribute for ink-pooling realism.
 // ---------------------------------------------------------------------------
-const SKETCH_TUBULAR = 14;    // segments along the stroke — enough to read the wobble
-const SKETCH_RADIAL  = 6;     // sides around the tube — slightly faceted, ink-like
-const WOBBLE_AMP     = 0.013; // perpendicular jitter at midpoints (world units)
+const SKETCH_TUBULAR  = 20;    // segments along the stroke — finer for smooth taper
+const SKETCH_RADIAL   = 6;     // sides around the tube — slightly faceted, ink-like
+// Two-frequency wobble: a slow drift (hand sway) + small jitter (paper grain).
+// Sum of the two stays close to the previous single-frequency feel (~0.013)
+// but the curve shape now has both low- and high-frequency components.
+const WOBBLE_AMP_LOW  = 0.011; // slow drift across the stroke (world units)
+const WOBBLE_AMP_HIGH = 0.005; // fine jitter at each control point (world units)
+
+// Tapered radius along the stroke: r(t) = TAPER_MIN + (1 - TAPER_MIN) * sin(πt)^TAPER_EXP
+//   t = 0   → r = TAPER_MIN   (pen touchdown)
+//   t = 0.5 → r = 1.0         (full pressure)
+//   t = 1   → r = TAPER_MIN   (pen lift)
+// TAPER_EXP < 1 widens the "fat middle" plateau (more pen-like) while still
+// pinching cleanly at the ends. TAPER_MIN keeps the tip from collapsing to a
+// degenerate point that would alias badly under MSAA / Bokeh blur.
+const TAPER_MIN = 0.20;
+const TAPER_EXP = 0.55;
+
+// Per-ring brightness modulation amplitude — ±RING_COLOR_AMP around 1.0.
+// Multiplied against material color via vertexColors. Low value (~0.07) reads
+// as ink "flow" variation rather than chromatic noise.
+const RING_COLOR_AMP = 0.07;
 
 function hashEdgeKey(s: string): number {
   let h = 2166136261;
@@ -178,7 +201,14 @@ function makeInkDot(seed: number, baseRadius: number): InkDotShape {
 
 function makeSketchCurve(key: string): THREE.CatmullRomCurve3 {
   const rng = mulberry32(hashEdgeKey(key));
-  const N   = 6;
+  // Two random phases for the slow drift — one per perpendicular axis.
+  // Pulled out of the loop so the drift is coherent (a single bow across
+  // the whole stroke) rather than re-randomized at each control point.
+  const lowPhaseA = rng() * Math.PI * 2;
+  const lowPhaseB = rng() * Math.PI * 2;
+  // 12 control points — finer than the previous 6 so the high-frequency
+  // jitter has somewhere to live in the catmull-rom interpolation.
+  const N = 12;
   const pts: THREE.Vector3[] = [];
   for (let i = 0; i < N; i++) {
     const t = i / (N - 1);
@@ -187,12 +217,92 @@ function makeSketchCurve(key: string): THREE.CatmullRomCurve3 {
       // Pin endpoints so strokes meet cleanly at the corner dots
       pts.push(new THREE.Vector3(0, y, 0));
     } else {
-      const a = (rng() * 2 - 1) * WOBBLE_AMP;
-      const b = (rng() * 2 - 1) * WOBBLE_AMP;
-      pts.push(new THREE.Vector3(a, y, b));
+      // Low-frequency hand drift: ~1.5 half-cycles across the stroke
+      const lowA  = Math.sin(t * Math.PI * 1.5 + lowPhaseA) * WOBBLE_AMP_LOW;
+      const lowB  = Math.sin(t * Math.PI * 1.5 + lowPhaseB) * WOBBLE_AMP_LOW;
+      // High-frequency paper-grain jitter — random per control point
+      const highA = (rng() * 2 - 1) * WOBBLE_AMP_HIGH;
+      const highB = (rng() * 2 - 1) * WOBBLE_AMP_HIGH;
+      pts.push(new THREE.Vector3(lowA + highA, y, lowB + highB));
     }
   }
   return new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
+}
+
+// ---------------------------------------------------------------------------
+// applyEdgeTaper — post-process a tube/cylinder geometry in place to
+// (a) pinch its ends toward TAPER_MIN of the original radius (pen-tip taper
+//     with a fat pressure-swelled middle), and
+// (b) bake a subtle per-ring brightness multiplier into a vertex-color
+//     attribute, simulating uneven ink flow.
+//
+// Works on any geometry whose vertex layout is `numRings` rings each with
+// `vertsPerRing` vertices, contiguous, in row-major order — which is exactly
+// what TubeGeometry and (open-ended) CylinderGeometry produce. The centerline
+// for each ring is computed by averaging the ring's vertices, so we don't
+// need to know anything about the underlying curve.
+// ---------------------------------------------------------------------------
+function applyEdgeTaper(
+  geo:          THREE.BufferGeometry,
+  numRings:     number,
+  vertsPerRing: number,
+  rng:          () => number,
+) {
+  const positions = geo.attributes.position;
+  const colors    = new Float32Array(positions.count * 3);
+  // Default any vertices outside the (numRings × vertsPerRing) block to white
+  // so they don't get accidentally darkened (e.g. cap vertices, if any).
+  colors.fill(1);
+
+  // TubeGeometry / open-ended CylinderGeometry duplicate the seam vertex —
+  // index 0 and index (vertsPerRing - 1) sit at the same angular position
+  // (UV continuity). Including both in the centroid average biases the center
+  // toward the seam and produces lopsided tapering, especially near the
+  // pinched tips. Average only the unique radial samples [0 .. vertsPerRing-2]
+  // for the centerline; we still scale ALL vertices (seam included) below so
+  // the seam stays continuous.
+  const uniqueRadial = vertsPerRing - 1;
+
+  for (let ri = 0; ri < numRings; ri++) {
+    // Ring centerline = mean of unique radial samples (skip seam duplicate)
+    let cx = 0, cy = 0, cz = 0;
+    for (let vi = 0; vi < uniqueRadial; vi++) {
+      const idx = ri * vertsPerRing + vi;
+      cx += positions.getX(idx);
+      cy += positions.getY(idx);
+      cz += positions.getZ(idx);
+    }
+    cx /= uniqueRadial; cy /= uniqueRadial; cz /= uniqueRadial;
+
+    const t           = numRings > 1 ? ri / (numRings - 1) : 0;
+    const taperBase   = Math.sin(Math.PI * t);
+    const radiusScale = TAPER_MIN + (1 - TAPER_MIN) * Math.pow(taperBase, TAPER_EXP);
+
+    // Brightness: small low-freq sweep (ink flow gradient) + small jitter
+    const lowFreq    = 0.5 * Math.sin(t * Math.PI * 2);
+    const highFreq   = rng() - 0.5;
+    const brightness = 1 + RING_COLOR_AMP * (lowFreq * 0.6 + highFreq * 0.4);
+
+    for (let vi = 0; vi < vertsPerRing; vi++) {
+      const idx = ri * vertsPerRing + vi;
+      const dx  = positions.getX(idx) - cx;
+      const dy  = positions.getY(idx) - cy;
+      const dz  = positions.getZ(idx) - cz;
+      positions.setXYZ(
+        idx,
+        cx + dx * radiusScale,
+        cy + dy * radiusScale,
+        cz + dz * radiusScale,
+      );
+      colors[idx * 3 + 0] = brightness;
+      colors[idx * 3 + 1] = brightness;
+      colors[idx * 3 + 2] = brightness;
+    }
+  }
+
+  positions.needsUpdate = true;
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
 }
 
 // Total index count of a non-closed TubeGeometry: tubular * radial * 6
@@ -508,8 +618,20 @@ export class Renderer {
     this.geoStraightHover = new THREE.CylinderGeometry(
       RADIUS_HOVER, RADIUS_HOVER, 1, 8, 1, true,
     );
+    // Owned settled stroke: 12 height segments so applyEdgeTaper has rings
+    // to pinch toward the ends. Shared across every settled owned edge —
+    // the taper pattern repeats but the modulation is subtle enough that the
+    // repetition reads as a deliberate pen aesthetic, not a tiling artifact.
     this.geoStraightOwned = new THREE.CylinderGeometry(
-      RADIUS_OWNED, RADIUS_OWNED, 1, 8, 1, true,
+      RADIUS_OWNED, RADIUS_OWNED, 1, 8, 12, true,
+    );
+    // Use a fixed seed (not per-edge) since this geometry is shared. Brightness
+    // pattern will be identical across edges; that's acceptable at 7% amplitude.
+    applyEdgeTaper(
+      this.geoStraightOwned,
+      13, // heightSegments + 1
+      9,  // radialSegments + 1
+      mulberry32(0xa11ce),
     );
 
     // Materials
@@ -533,17 +655,23 @@ export class Renderer {
       emissive:          new THREE.Color(0xb06010),
       emissiveIntensity: 0.20,
     });
+    // vertexColors enabled on all owned/completed/glow materials — these are
+    // the materials paired with tapered tube/cylinder geometries that bake
+    // per-ring brightness into a color attribute. Multiplies material.color
+    // by the per-vertex value, giving subtle ink-flow modulation along the
+    // length of each stroke. matNeutral / matHover stay off (they pair with
+    // un-tapered, uniform-color geometries — geoStraightNeutral / geoStraightHover).
     this.matPlayerA = new THREE.MeshStandardMaterial({
-      color: PLAYER_COLORS.A, roughness: 0.60, metalness: 0.05,
+      color: PLAYER_COLORS.A, roughness: 0.60, metalness: 0.05, vertexColors: true,
     });
     this.matPlayerB = new THREE.MeshStandardMaterial({
-      color: PLAYER_COLORS.B, roughness: 0.60, metalness: 0.05,
+      color: PLAYER_COLORS.B, roughness: 0.60, metalness: 0.05, vertexColors: true,
     });
     this.matCompA = new THREE.MeshStandardMaterial({
-      color: COMPLETED_COLOR.A, roughness: 0.82, metalness: 0,
+      color: COMPLETED_COLOR.A, roughness: 0.82, metalness: 0, vertexColors: true,
     });
     this.matCompB = new THREE.MeshStandardMaterial({
-      color: COMPLETED_COLOR.B, roughness: 0.82, metalness: 0,
+      color: COMPLETED_COLOR.B, roughness: 0.82, metalness: 0, vertexColors: true,
     });
     // Post-placement glow: same hue, lower roughness, slight emissive warmth
     this.matGlowA = new THREE.MeshStandardMaterial({
@@ -552,6 +680,7 @@ export class Renderer {
       metalness:         0.05,
       emissive:          new THREE.Color(PLAYER_COLORS.A),
       emissiveIntensity: 0.22,
+      vertexColors:      true,
     });
     this.matGlowB = new THREE.MeshStandardMaterial({
       color:             PLAYER_COLORS.B,
@@ -559,6 +688,7 @@ export class Renderer {
       metalness:         0.05,
       emissive:          new THREE.Color(PLAYER_COLORS.B),
       emissiveIntensity: 0.22,
+      vertexColors:      true,
     });
     // Traveling draw-in highlight — bright, high-emissive, small sphere.
     // Light tint of the player hue so the spark reads as "their color" but
@@ -788,10 +918,18 @@ export class Renderer {
     // curve lives in mesh-local space (Y from -0.5 to +0.5) so the
     // existing per-edge mesh.rotation orients it correctly across x/y/z.
     const curve = makeSketchCurve(key);
+    const geoCompleted = new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_COMPLETED, SKETCH_RADIAL, false);
+    const geoOwned     = new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_OWNED,     SKETCH_RADIAL, false);
+    // Per-edge taper + vertex-color bake. Two independent rngs (seeded from
+    // the same edge key with different salts) so completed and owned tubes
+    // get visually distinct ink-flow patterns.
+    const tubularRings  = SKETCH_TUBULAR + 1;
+    const tubularVperR  = SKETCH_RADIAL + 1;
+    applyEdgeTaper(geoCompleted, tubularRings, tubularVperR, mulberry32(hashEdgeKey(key) ^ 0xc0ffee));
+    applyEdgeTaper(geoOwned,     tubularRings, tubularVperR, mulberry32(hashEdgeKey(key) ^ 0xfacade));
     const sketch: EdgeSketchData = {
       startPos, endPos, midPos, dirVec, curve,
-      geoCompleted: new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_COMPLETED, SKETCH_RADIAL, false),
-      geoOwned:     new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_OWNED,     SKETCH_RADIAL, false),
+      geoCompleted, geoOwned,
     };
 
     // Initial geometry is the shared straight neutral cylinder — every
