@@ -66,45 +66,40 @@ const DOF_MAXBLUR_BASE  = 0.009;  // cap at DOF_REF_DIST
 const DOF_REF_DIST      = 7;      // matches CameraController ZOOM_DEFAULT
 
 // ---------------------------------------------------------------------------
-// Atmosphere pass — paper / risograph feel
+// Atmosphere pass — paper grain, cube only
 //
-// A single full-screen ShaderPass applied AFTER BokehPass and BEFORE
-// OutputPass (so the linear→sRGB conversion stays last) layers four cheap
-// effects onto the composited frame:
+// A single full-screen ShaderPass that adds static, monochrome paper grain
+// to the rendered scene. Grain is gated by the scene depth buffer so it is
+// applied ONLY where actual geometry was drawn (cube wireframe, corner
+// dots, sub-cube fills, face-completion fills, shadow plane) — never to
+// the cream paper background, which sits at the far-plane depth (1.0).
 //
-//   1. Paper-light unevenness — low-frequency fbm * gentle ±N% multiplier,
-//      static (no time) so it reads as baked paper character, not flicker.
-//   2. Vignette                — smooth radial darkening from screen center.
-//   3. Warmth tint             — multiplicative shift toward warm cream.
-//   4. Grain                   — per-pixel hash, monochromatic, static.
+// Pipeline placement: this pass runs BEFORE BokehPass, not after. That
+// matters because the pass needs to sample composerTarget.depthTexture as
+// an input uniform, while BokehPass eventually writes color to that same
+// render target. Reading from a depth texture that is currently bound as a
+// render target's depth attachment is a feedback loop in WebGL. Putting
+// the atmosphere pass first (when readBuffer is composerTarget and write
+// goes to the swap target) keeps the read/write separation clean.
 //
-// All four strengths are uniforms driven from React via setAtmosphereParams,
-// so values can be tuned live without recompiling. Defaults are intentionally
-// strong enough to be obviously visible during testing — see the
-// ATMOSPHERE_DEFAULTS export consumed by App.tsx for the numbers.
+// A side benefit of running before bokeh is that grain on out-of-focus
+// parts of the cube gets blurred along with the rest of those pixels —
+// which matches how grain reads on a real lens-blurred photograph.
 // ---------------------------------------------------------------------------
 export interface AtmosphereParams {
-  grainStrength:       number;  // 0..0.3 sensible
-  vignetteStrength:    number;  // 0..1
-  paperLightStrength:  number;  // 0..0.5
-  warmthAmount:        number;  // 0..1 (0 = none, 1 = full warm-tint multiply)
+  grainStrength: number;  // 0..0.3 sensible
 }
 
 export const ATMOSPHERE_DEFAULTS: AtmosphereParams = {
-  grainStrength:      0.10,
-  vignetteStrength:   0.45,
-  paperLightStrength: 0.18,
-  warmthAmount:       0.30,
+  grainStrength: 0.07,
 };
 
 const ATMOSPHERE_SHADER = {
   uniforms: {
-    tDiffuse:           { value: null as THREE.Texture | null },
-    uResolution:        { value: new THREE.Vector2(1, 1) },
-    uGrainStrength:     { value: ATMOSPHERE_DEFAULTS.grainStrength },
-    uVignetteStrength:  { value: ATMOSPHERE_DEFAULTS.vignetteStrength },
-    uPaperLightStrength:{ value: ATMOSPHERE_DEFAULTS.paperLightStrength },
-    uWarmthAmount:      { value: ATMOSPHERE_DEFAULTS.warmthAmount },
+    tDiffuse:       { value: null as THREE.Texture | null },
+    tDepth:         { value: null as THREE.Texture | null },
+    uResolution:    { value: new THREE.Vector2(1, 1) },
+    uGrainStrength: { value: ATMOSPHERE_DEFAULTS.grainStrength },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -115,11 +110,9 @@ const ATMOSPHERE_SHADER = {
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
+    uniform sampler2D tDepth;
     uniform vec2  uResolution;
     uniform float uGrainStrength;
-    uniform float uVignetteStrength;
-    uniform float uPaperLightStrength;
-    uniform float uWarmthAmount;
     varying vec2 vUv;
 
     // Cheap deterministic 2D hash → [0,1).
@@ -129,54 +122,22 @@ const ATMOSPHERE_SHADER = {
       return fract(p.x * p.y);
     }
 
-    // Smooth value noise (cubic interp).
-    float vnoise(vec2 p) {
-      vec2 i = floor(p);
-      vec2 f = fract(p);
-      vec2 u = f * f * (3.0 - 2.0 * f);
-      float a = hash21(i);
-      float b = hash21(i + vec2(1.0, 0.0));
-      float c = hash21(i + vec2(0.0, 1.0));
-      float d = hash21(i + vec2(1.0, 1.0));
-      return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-    }
-
-    // 4-octave fbm for low-frequency paper-light variation.
-    float fbm(vec2 p) {
-      float v = 0.0;
-      float a = 0.5;
-      for (int i = 0; i < 4; ++i) {
-        v += a * vnoise(p);
-        p *= 2.0;
-        a *= 0.5;
-      }
-      return v;
-    }
-
     void main() {
-      vec3 col = texture2D(tDiffuse, vUv).rgb;
+      vec4 col = texture2D(tDiffuse, vUv);
 
-      // 1. Paper light unevenness (multiplicative, ±strength/2).
-      float light = fbm(vUv * 2.5);                       // ~0..1
-      col *= 1.0 + (light - 0.5) * uPaperLightStrength;
+      // Geometry mask: depth == 1.0 means the far plane, i.e. the scene
+      // background quad (no real geometry was drawn at this pixel). We
+      // smoothstep just below 1.0 so antialiased silhouette pixels still
+      // get partial grain rather than a hard edge.
+      float depth = texture2D(tDepth, vUv).r;
+      float mask  = 1.0 - smoothstep(0.998, 1.0, depth);
 
-      // 2. Vignette: smooth radial darken from center.
-      //    distance is normalised so corners reach 1.0 (sqrt(0.5²+0.5²)*√2).
-      float dist = length(vUv - 0.5) * 1.41421356;        // 0 center → 1 corner
-      float vig  = smoothstep(0.55, 1.05, dist) * uVignetteStrength;
-      col *= 1.0 - vig;
-
-      // 3. Warmth tint: shift toward warm cream by lerp(col, col*tint, t).
-      vec3 warmTint = vec3(1.04, 1.005, 0.93);
-      col = mix(col, col * warmTint, uWarmthAmount);
-
-      // 4. Grain: 2 CSS-pixel cells of monochrome noise, static (no time)
-      //    so it reads as paper grain rather than film flicker.
+      // Static, monochrome paper grain: 2 CSS-pixel cells per "tooth".
       vec2 grainCell = floor(vUv * uResolution * 0.5);
       float g = hash21(grainCell) - 0.5;
-      col += g * uGrainStrength;
+      col.rgb += g * uGrainStrength * mask;
 
-      gl_FragColor = vec4(col, 1.0);
+      gl_FragColor = col;
     }
   `,
 };
@@ -937,29 +898,70 @@ export class Renderer {
 
   // ---------------------------------------------------------------------------
   // Postprocessing pipeline:
-  //   RenderPass (scene → MSAA target)
-  //   BokehPass  (lens-style depth-of-field blur, focus tracks camera)
-  //   OutputPass (linear → sRGB conversion at the very end)
+  //   RenderPass     (scene → MSAA target, also writes depthTexture)
+  //   AtmospherePass (paper grain, masked by depth so background is excluded)
+  //   BokehPass      (lens-style depth-of-field blur, focus tracks camera)
+  //   OutputPass     (linear → sRGB conversion at the very end)
   //
   // The composer's render target is multisampled (samples = 4 on WebGL2) so
-  // we don't lose antialiasing by going through postprocessing.
+  // we don't lose antialiasing by going through postprocessing. A
+  // DepthTexture is attached to that same target so the AtmospherePass can
+  // sample scene depth to mask grain to geometry only — see the comment on
+  // ATMOSPHERE_SHADER above for why this pass must run before BokehPass.
   // ---------------------------------------------------------------------------
   private setupPostprocessing(w: number, h: number) {
     const dpr = this.renderer.getPixelRatio();
-    this.composerTarget = new THREE.WebGLRenderTarget(
-      Math.max(1, Math.floor(w * dpr)),
-      Math.max(1, Math.floor(h * dpr)),
-      { samples: 4, type: THREE.HalfFloatType },
-    );
+    const tw  = Math.max(1, Math.floor(w * dpr));
+    const th  = Math.max(1, Math.floor(h * dpr));
+
+    // Sampleable depth attachment. UnsignedShortType is fine for our 0.998
+    // threshold — we only need to distinguish far-plane (background) pixels
+    // from anything closer, not reconstruct world-space depth.
+    const depthTexture  = new THREE.DepthTexture(tw, th);
+    depthTexture.type   = THREE.UnsignedShortType;
+    depthTexture.format = THREE.DepthFormat;
+
+    this.composerTarget = new THREE.WebGLRenderTarget(tw, th, {
+      samples:      4,
+      type:         THREE.HalfFloatType,
+      depthTexture,
+    });
     this.composer = new EffectComposer(this.renderer, this.composerTarget);
     this.composer.setPixelRatio(dpr);
     this.composer.setSize(w, h);
 
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
+    // Atmosphere — paper grain only, masked to geometry via depth. Runs
+    // immediately after RenderPass so it reads from composerTarget (which
+    // owns the depthTexture) without a feedback loop: the swap target is
+    // the write destination here, and composerTarget is read-only for
+    // both tDiffuse and tDepth at this point.
+    //
+    // We override render() instead of binding tDepth to a fixed texture
+    // so that any future re-ordering of passes still binds the depth
+    // attached to the *current* readBuffer (which is what tDiffuse also
+    // reads from). Both rt1 and rt2 carry a depthTexture (rt2 is a clone
+    // of rt1), so readBuffer.depthTexture is always defined here.
+    this.atmospherePass = new ShaderPass(ATMOSPHERE_SHADER);
+    {
+      const u = this.atmospherePass.uniforms as Record<string, THREE.IUniform>;
+      u.uResolution.value.set(w, h);
+      u.tDepth.value = depthTexture; // initial value; updated per-frame below
+    }
+    const baseRender = this.atmospherePass.render.bind(this.atmospherePass);
+    this.atmospherePass.render = (renderer, writeBuffer, readBuffer, deltaTime, maskActive) => {
+      const u = this.atmospherePass.uniforms as Record<string, THREE.IUniform>;
+      u.tDepth.value = readBuffer.depthTexture ?? depthTexture;
+      baseRender(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+    };
+    this.composer.addPass(this.atmospherePass);
+
     // Bokeh — focus, aperture, and maxblur are all updated per-frame in
     // tick() so the depth-of-field tracks the camera as the user zooms.
     // See the DOF_* constants at the top of the file for the tuning model.
+    // BokehPass renders the scene a second time internally with its own
+    // depth shader, so it does not need composerTarget.depthTexture.
     this.bokehPass = new BokehPass(this.scene, this.camera, {
       focus:    DOF_REF_DIST,    // overwritten per-frame
       aperture: DOF_APERTURE_BASE,
@@ -969,33 +971,20 @@ export class Renderer {
     (this.bokehPass.uniforms as Record<string, THREE.IUniform>).aspect.value = w / h;
     this.composer.addPass(this.bokehPass);
 
-    // Atmosphere — paper-grain + vignette + uneven paper light + warm tint
-    // applied as a single full-screen shader. Sits AFTER bokeh so the blur
-    // is still applied to scene depth, but BEFORE OutputPass so the linear
-    // → sRGB conversion remains the very last step.
-    this.atmospherePass = new ShaderPass(ATMOSPHERE_SHADER);
-    (this.atmospherePass.uniforms as Record<string, THREE.IUniform>)
-      .uResolution.value.set(w, h);
-    this.composer.addPass(this.atmospherePass);
-
     // Linear → sRGB conversion (required when going through postprocessing
     // since intermediate buffers are linear-space).
     this.composer.addPass(new OutputPass());
   }
 
   // ---------------------------------------------------------------------------
-  // Atmosphere tuning — called from React via Game.setAtmosphereParams when
-  // the user moves a slider in the in-app tuning panel. Each field is
-  // optional so partial updates work; missing fields keep their current
-  // uniform value.
+  // Atmosphere tuning — programmatic hook for adjusting grain strength at
+  // runtime. Currently only `grainStrength` is exposed; partial updates are
+  // a no-op for missing fields so adding more knobs later stays additive.
   // ---------------------------------------------------------------------------
   setAtmosphereParams(params: Partial<AtmosphereParams>) {
     if (!this.atmospherePass) return;
     const u = this.atmospherePass.uniforms as Record<string, THREE.IUniform>;
-    if (params.grainStrength      !== undefined) u.uGrainStrength.value      = params.grainStrength;
-    if (params.vignetteStrength   !== undefined) u.uVignetteStrength.value   = params.vignetteStrength;
-    if (params.paperLightStrength !== undefined) u.uPaperLightStrength.value = params.paperLightStrength;
-    if (params.warmthAmount       !== undefined) u.uWarmthAmount.value       = params.warmthAmount;
+    if (params.grainStrength !== undefined) u.uGrainStrength.value = params.grainStrength;
   }
 
   // ---------------------------------------------------------------------------
