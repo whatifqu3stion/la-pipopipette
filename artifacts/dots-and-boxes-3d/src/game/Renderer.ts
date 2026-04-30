@@ -86,20 +86,14 @@ const DOF_REF_DIST      = 7;      // matches CameraController ZOOM_DEFAULT
 // parts of the cube gets blurred along with the rest of those pixels —
 // which matches how grain reads on a real lens-blurred photograph.
 // ---------------------------------------------------------------------------
-export interface AtmosphereParams {
-  grainStrength: number;  // 0..0.3 sensible
-}
-
-export const ATMOSPHERE_DEFAULTS: AtmosphereParams = {
-  grainStrength: 0.07,
-};
+const GRAIN_STRENGTH = 0.07; // 0..0.3 sensible
 
 const ATMOSPHERE_SHADER = {
   uniforms: {
     tDiffuse:       { value: null as THREE.Texture | null },
     tDepth:         { value: null as THREE.Texture | null },
     uResolution:    { value: new THREE.Vector2(1, 1) },
-    uGrainStrength: { value: ATMOSPHERE_DEFAULTS.grainStrength },
+    uGrainStrength: { value: GRAIN_STRENGTH },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -974,17 +968,6 @@ export class Renderer {
     // Linear → sRGB conversion (required when going through postprocessing
     // since intermediate buffers are linear-space).
     this.composer.addPass(new OutputPass());
-  }
-
-  // ---------------------------------------------------------------------------
-  // Atmosphere tuning — programmatic hook for adjusting grain strength at
-  // runtime. Currently only `grainStrength` is exposed; partial updates are
-  // a no-op for missing fields so adding more knobs later stays additive.
-  // ---------------------------------------------------------------------------
-  setAtmosphereParams(params: Partial<AtmosphereParams>) {
-    if (!this.atmospherePass) return;
-    const u = this.atmospherePass.uniforms as Record<string, THREE.IUniform>;
-    if (params.grainStrength !== undefined) u.uGrainStrength.value = params.grainStrength;
   }
 
   // ---------------------------------------------------------------------------

@@ -50,11 +50,9 @@ const BOARD_BG_LAYERS: React.CSSProperties = {
 // the postprocessing pipeline (see ATMOSPHERE_SHADER in Renderer.ts). The
 // pass samples the scene depth so grain is added ONLY where geometry was
 // drawn (cube wireframe, dots, completed-cube fills, shadow plane) — the
-// cream paper background is left untouched. The grain strength baseline
-// lives in ATMOSPHERE_DEFAULTS in Renderer.ts; nothing in this file needs
-// to know about it. The previous SVG turbulence DOM overlay and the
-// in-app tuning panel that drove vignette / paper-light / warmth uniforms
-// have both been removed — only grain remains.
+// cream paper background is left untouched. The grain strength is a fixed
+// constant (GRAIN_STRENGTH) inside Renderer.ts; nothing in this file needs
+// to know about it.
 // ---------------------------------------------------------------------------
 
 // Safe-area-aware padding helpers (CSS calc strings)

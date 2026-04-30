@@ -36,7 +36,7 @@ See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and pa
   - `src/game/types.ts` — TypeScript types (Edge, Face, Cube, Owner, etc.)
   - `src/game/GameModel.ts` — Pure data model: grid building, adjacency logic, gravity support
   - `src/game/GameState.ts` — Game logic: turn management, scoring, undo, event system
-  - `src/game/Renderer.ts` — Three.js scene: points, edges (with hit zones), faces, cubes; postprocessing pipeline with depth-of-field (BokehPass) and a paper-atmosphere ShaderPass (grain + vignette + uneven paper light + warm tint, tunable via `setAtmosphereParams`)
+  - `src/game/Renderer.ts` — Three.js scene: points, edges (with hit zones), faces, cubes; postprocessing pipeline with depth-of-field (BokehPass) and a depth-masked paper-grain ShaderPass (cube only, fixed `GRAIN_STRENGTH`)
   - `src/game/CameraController.ts` — Turntable camera: cube yaw spins with 90° snap + overshoot; user-controlled elevation (10°–80°) via vertical drag; fixed azimuth
   - `src/game/InputController.ts` — Mouse/touch raycast input handling
   - `src/game/Game.ts` — Orchestrator tying all modules together

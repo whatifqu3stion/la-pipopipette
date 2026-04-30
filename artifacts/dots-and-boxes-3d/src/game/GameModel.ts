@@ -12,10 +12,6 @@ function cubeKey(c: Cube): string {
   return `${c.origin.x},${c.origin.y},${c.origin.z}`;
 }
 
-function eq(a: Point, b: Point): boolean {
-  return a.x === b.x && a.y === b.y && a.z === b.z;
-}
-
 /**
  * Build all 27 grid points (x,y,z in {0,1,2})
  */
@@ -147,17 +143,6 @@ export function getCubeFaces(cube: Cube): Face[] {
 }
 
 /**
- * Get all faces adjacent to a given edge (edges can border 1-4 faces)
- */
-export function getEdgeFaces(edge: Edge, faces: Face[]): Face[] {
-  return faces.filter(f => {
-    const fEdges = getFaceEdges(f);
-    return fEdges.some(fe => edgeKey(fe) === edgeKey(edge));
-  });
-}
-
-
-/**
  * Get the 12 unique edges that form the wireframe of a cube.
  * A cube at origin (ox, oy, oz) spans [ox, ox+1] × [oy, oy+1] × [oz, oz+1].
  *
@@ -186,4 +171,4 @@ export function getCubeEdges(cube: Cube): Edge[] {
   ];
 }
 
-export { edgeKey, faceKey, cubeKey, eq };
+export { edgeKey, faceKey, cubeKey };
