@@ -394,11 +394,15 @@ export class Renderer {
   // Per-dot ink geometries (deterministic, irregular).  Tracked so dispose()
   // can free GPU buffers — there is no shared geoPoint anymore.
   private dotGeometries: THREE.SphereGeometry[] = [];
-  // Shared straight-cylinder geometries for the unplayed grid (NEUTRAL) and
-  // the interactive preview (HOVER). Single instance per tier, reused by
-  // every edge mesh — orientation is handled by per-edge mesh rotation.
+  // Shared straight-cylinder geometries for the unplayed grid (NEUTRAL),
+  // the interactive preview (HOVER), and the settled played stroke (OWNED).
+  // Single instance per tier, reused by every edge mesh — orientation is
+  // handled by per-edge mesh rotation. The OWNED variant is what each
+  // played edge swaps to once its wavy draw-in animation completes, so
+  // the line "settles" from organic ink into a clean grid mark.
   private geoStraightNeutral: THREE.CylinderGeometry;
   private geoStraightHover:   THREE.CylinderGeometry;
+  private geoStraightOwned:   THREE.CylinderGeometry;
 
   // Materials
   private matNeutral:    THREE.MeshStandardMaterial;
@@ -497,6 +501,9 @@ export class Renderer {
     );
     this.geoStraightHover = new THREE.CylinderGeometry(
       RADIUS_HOVER, RADIUS_HOVER, 1, 8, 1, true,
+    );
+    this.geoStraightOwned = new THREE.CylinderGeometry(
+      RADIUS_OWNED, RADIUS_OWNED, 1, 8, 1, true,
     );
 
     // Materials
@@ -867,8 +874,10 @@ export class Renderer {
         mesh.material = this.matHover;
 
       } else if (key === this.lastPlacedEdgeKey && owner) {
-        // ② Post-placement glow (timer running) — wavy ink stroke
-        mesh.geometry = sketch.geoOwned;
+        // ② Post-placement glow (timer running) — straight settled stroke
+        // in glow color. The wavy draw-in already played out in tick(); by
+        // the time we're here the stroke has snapped to the clean line.
+        mesh.geometry = this.geoStraightOwned;
         mesh.material = owner === 'A' ? this.matGlowA : this.matGlowB;
 
       } else if (completedCubeEdgeOwner.has(key)) {
@@ -878,12 +887,12 @@ export class Renderer {
         mesh.material = cubeOwner === 'A' ? this.matCompA : this.matCompB;
 
       } else if (owner === 'A') {
-        // ④ Owned mid-game — wavy ink stroke
-        mesh.geometry = sketch.geoOwned;
+        // ④ Owned mid-game — settled straight stroke in player color
+        mesh.geometry = this.geoStraightOwned;
         mesh.material = this.matPlayerA;
 
       } else if (owner === 'B') {
-        mesh.geometry = sketch.geoOwned;
+        mesh.geometry = this.geoStraightOwned;
         mesh.material = this.matPlayerB;
 
       } else {
@@ -1054,8 +1063,12 @@ export class Renderer {
         .lerp(anim.sketch.endPos, p);
 
       if (raw >= 1) {
-        // Animation complete — restore full draw range
+        // Animation complete — restore the wavy geo's draw range so any
+        // future re-use (undo + replay) starts clean, then snap the visible
+        // mesh to the shared straight cylinder. The stroke "settles" from
+        // organic ink into a clean grid mark right as the spark arrives.
         anim.sketch.geoOwned.drawRange.count = Infinity;
+        mesh.geometry = this.geoStraightOwned;
 
         this.scene.remove(anim.highlight);
         this.edgeAnims.delete(key);
@@ -1164,6 +1177,7 @@ export class Renderer {
     this.geoHighlight.dispose();
     this.geoStraightNeutral.dispose();
     this.geoStraightHover.dispose();
+    this.geoStraightOwned.dispose();
     for (const geo of this.dotGeometries) geo.dispose();
     this.dotGeometries.length = 0;
     this.shadowFloor.geometry.dispose();
