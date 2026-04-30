@@ -43,6 +43,45 @@ const BOARD_BG_LAYERS: React.CSSProperties = {
   backgroundColor: BG,
 };
 
+// ---------------------------------------------------------------------------
+// Procedural grain overlay
+//
+// A barely-there risograph-style grain that sits OVER the final composite
+// (canvas + crumple overlay) but UNDER the UI controls, giving the whole
+// view a touch of light variation and paper tooth without distorting the
+// gameplay objects themselves.
+//
+// Implementation: an inline SVG `feTurbulence` filter rasterised once by
+// the browser and tiled across the viewport. No external image asset, no
+// shader pass, no library — the simplest possible thing that works. Cost
+// is essentially a single small tiled image, GPU-composited.
+//
+// Layering: zIndex 3 (above crumple overlay at zIndex 2, below UI at 10+).
+// `mix-blend-mode: soft-light` keeps it as a light/dark modulation rather
+// than a flat tint, so colors below stay correct.
+// ---------------------------------------------------------------------------
+const GRAIN_ENABLED = true; // single switch to disable the effect entirely
+
+// Tiled procedural noise. baseFrequency tuned for a fine paper-tooth grain
+// (higher = finer); the alpha row in feColorMatrix sets per-pixel intensity
+// before we layer-opacity it down to "barely there".
+const GRAIN_SVG =
+  "<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'>" +
+    "<filter id='n'>" +
+      "<feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/>" +
+      "<feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/>" +
+    "</filter>" +
+    "<rect width='100%' height='100%' filter='url(%23n)'/>" +
+  "</svg>";
+const GRAIN_URL = `url("data:image/svg+xml;utf8,${encodeURIComponent(GRAIN_SVG)}")`;
+
+// Soft perf guard: on devices reporting few logical cores (typical of
+// low-end phones), drop opacity to ~half. The actual GPU cost of a single
+// tiled image is negligible, but per the request we keep a knob.
+const IS_LOW_END_DEVICE =
+  typeof navigator !== 'undefined' && (navigator.hardwareConcurrency ?? 8) <= 4;
+const GRAIN_OPACITY = GRAIN_ENABLED ? (IS_LOW_END_DEVICE ? 0.045 : 0.085) : 0;
+
 // Safe-area-aware padding helpers (CSS calc strings)
 const safeTop    = 'calc(env(safe-area-inset-top, 0px) + 12px)';
 const safeBottom = 'calc(env(safe-area-inset-bottom, 0px) + 10px)';
@@ -376,6 +415,28 @@ export default function App() {
           mixBlendMode:       'multiply' as React.CSSProperties['mixBlendMode'],
         }}
       />
+
+      {/* ── Procedural grain overlay ──
+           Inline SVG turbulence pattern tiled across the viewport. Sits
+           above the crumple overlay (zIndex 2) and below the UI (zIndex
+           10+) so gameplay stays crisp. See the GRAIN_* constants above
+           for the toggle / opacity tuning. */}
+      {GRAIN_OPACITY > 0 && (
+        <div
+          aria-hidden="true"
+          style={{
+            position:         'absolute',
+            inset:            0,
+            pointerEvents:    'none',
+            zIndex:           3,
+            backgroundImage:  GRAIN_URL,
+            backgroundRepeat: 'repeat',
+            backgroundSize:   '240px 240px',
+            opacity:          GRAIN_OPACITY,
+            mixBlendMode:     'soft-light' as React.CSSProperties['mixBlendMode'],
+          }}
+        />
+      )}
 
       {/* ── TOP BAR ── */}
       <div style={{
