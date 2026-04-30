@@ -51,6 +51,19 @@ const EDGE_GLOW_MS = 350;  // post-draw emphasis duration (ms)
 const CUBE_ANIM_MS = 400;  // cube scale-in duration (ms)
 const FACE_FILL_MS = 800;  // face "marker stroke" fill-in duration (ms)
 
+// ---------------------------------------------------------------------------
+// Depth-of-field tuning
+// ---------------------------------------------------------------------------
+// BokehPass blur is expressed in normalised screen units, but the cube's
+// world-space depth doesn't change with zoom — so a fixed aperture/maxblur
+// looks "right" at one zoom level and degrades elsewhere (invisible when
+// zoomed in, halo-prone when zoomed out). To match how a real lens behaves
+// (shallower DoF the closer you get to the subject), we scale aperture and
+// maxblur inversely with camera distance, anchored at DOF_REF_DIST.
+const DOF_APERTURE_BASE = 0.0035; // strength at DOF_REF_DIST
+const DOF_MAXBLUR_BASE  = 0.009;  // cap at DOF_REF_DIST
+const DOF_REF_DIST      = 7;      // matches CameraController ZOOM_DEFAULT
+
 // Glow swell that masks the wavy → straight geometry snap.
 // During the last (1 - GLOW_SWELL_START_FRAC) of the draw, the stroke's
 // emissive intensity ramps from BASE up to PEAK so it's visibly aglow at
@@ -826,24 +839,13 @@ export class Renderer {
 
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
-    // Bokeh — focus is set per-frame in tick() so it follows the cube.
-    // Aperture controls how strong the blur grows with distance from focus;
-    // maxblur clamps the total blur radius (in normalized screen units).
-    //
-    // Tuning principle: with `focus` parked on the cube's front face, the
-    // shader computes blur ∝ aperture · (focus − viewZ). The cube extends
-    // ~2.73 world units from front face to back corner, so we choose
-    //   aperture · 2.73 ≈ maxblur
-    // i.e. the cube only just reaches the cap at its deepest point. This
-    // keeps the gradient *continuous* through the whole front-to-back of
-    // the cube (front sharp → middle softer → back softest) instead of
-    // saturating partway through. The paper background sits a touch
-    // beyond the cube depth so it reads as "further away" without a
-    // jarring halo.
+    // Bokeh — focus, aperture, and maxblur are all updated per-frame in
+    // tick() so the depth-of-field tracks the camera as the user zooms.
+    // See the DOF_* constants at the top of the file for the tuning model.
     this.bokehPass = new BokehPass(this.scene, this.camera, {
-      focus:    7,        // overwritten per-frame
-      aperture: 0.0035,
-      maxblur:  0.009,
+      focus:    DOF_REF_DIST,    // overwritten per-frame
+      aperture: DOF_APERTURE_BASE,
+      maxblur:  DOF_MAXBLUR_BASE,
     });
     // BokehPass shader takes aspect from a uniform; keep it in sync on resize.
     (this.bokehPass.uniforms as Record<string, THREE.IUniform>).aspect.value = w / h;
@@ -1497,11 +1499,19 @@ export class Renderer {
 
     // Bokeh focal plane sits right at the cube's *front face* (cube extends
     // ±1 unit from its center in each axis) so the closest face reads razor-
-    // sharp and the back of the cube collects all the blur. Pulling the plane
-    // back from the previous camDist-0.6 offset means front-face details
-    // (edges and dots) snap into focus instead of sitting in a soft zone.
-    (this.bokehPass.uniforms as Record<string, THREE.IUniform>).focus.value =
-      Math.max(0.1, camDist - 1.0);
+    // sharp and the back of the cube collects all the blur.
+    //
+    // Aperture and maxblur are scaled by DOF_REF_DIST/camDist so the *per-
+    // ceived* depth-of-field stays consistent across zoom levels. Without
+    // this, the cube grows on screen as you zoom in but the blur stays
+    // fixed in pixels — so the back face reads as sharp at close zoom even
+    // though it's the same world-space distance from focus. Real lenses
+    // have shallower DoF the closer you get to the subject; this mimics it.
+    const dofU = this.bokehPass.uniforms as Record<string, THREE.IUniform>;
+    const dofScale = DOF_REF_DIST / Math.max(0.1, camDist);
+    dofU.focus.value    = Math.max(0.1, camDist - 1.0);
+    dofU.aperture.value = DOF_APERTURE_BASE * dofScale;
+    dofU.maxblur.value  = DOF_MAXBLUR_BASE  * dofScale;
 
     // Fade the shadow-catcher floor out gracefully as the camera tilts
     // toward / below the floor's level so it never appears as a visible
