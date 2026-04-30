@@ -697,7 +697,7 @@ export class Renderer {
   // to follow the camera's distance to the cube center, so the focal plane
   // sits on the cube no matter how far in/out the user has zoomed.
   private composer!: EffectComposer;
-  private atmospherePass!: ShaderPass;
+  private atmospherePass?: ShaderPass;
   private bokehPass!: BokehPass;
   private composerTarget!: THREE.WebGLRenderTarget;
 
@@ -908,23 +908,28 @@ export class Renderer {
     const tw  = Math.max(1, Math.floor(w * dpr));
     const th  = Math.max(1, Math.floor(h * dpr));
 
-    // Sampleable depth attachment. UnsignedShortType is fine for our 0.998
-    // threshold — we only need to distinguish far-plane (background) pixels
-    // from anything closer, not reconstruct world-space depth.
-    const depthTexture  = new THREE.DepthTexture(tw, th);
-    depthTexture.type   = THREE.UnsignedShortType;
-    depthTexture.format = THREE.DepthFormat;
-
-    // Feature-detect the high-quality target combo (MSAA + half-float color
-    // + sampleable depth). Many mobile WebViews — including the system
-    // WebView wrapping the Replit mobile app — don't support color-renderable
-    // half-float attachments and/or can't combine MSAA color renderbuffers
-    // with a sampleable DepthTexture. In those cases the framebuffer
-    // becomes incomplete, three.js silently renders nothing, and the user
-    // sees a blank background with no cube. So we degrade to the
-    // universally-supported configuration on devices that can't handle the
-    // high-quality path: edges are jaggier (no MSAA) and the bokeh blur can
-    // band slightly (8-bit color), but the scene actually renders.
+    // -------------------------------------------------------------------
+    // Pick a render-target config that's known to work on this device.
+    //
+    // The high-quality path (HalfFloatType color + 4× MSAA + sampleable
+    // DepthTexture) is the textbook recipe for an incomplete framebuffer
+    // on mobile WebViews — including the system WebView that wraps the
+    // Replit mobile app. When the framebuffer is incomplete, three.js
+    // silently renders nothing into the offscreen target, the composer
+    // chain produces no output, and the canvas shows only the renderer's
+    // cream clear color (which is what the user sees: UI on top of an
+    // empty cream background, no cube).
+    //
+    // The trickiest case is iOS Safari: it advertises both WebGL2 and
+    // EXT_color_buffer_half_float, so a pure capability probe says "go
+    // ahead with HQ" — but the actual MSAA + DepthTexture combination
+    // still fails on a meaningful subset of iOS devices/drivers. So
+    // capability probing alone isn't enough; we also force the safe path
+    // on any device that looks like a phone or tablet. Visual cost on
+    // mobile: paper grain on geometry is gone (the AtmospherePass needs
+    // a depth attachment, so we drop both together) and edges are
+    // jaggier without MSAA. Cube actually renders, which is the point.
+    // -------------------------------------------------------------------
     const gl = this.renderer.getContext();
     const isWebGL2 =
       typeof WebGL2RenderingContext !== 'undefined' &&
@@ -933,12 +938,28 @@ export class Renderer {
       gl.getExtension('EXT_color_buffer_half_float') ||
       gl.getExtension('EXT_color_buffer_float')
     );
-    const useHQ = isWebGL2 && supportsHalfFloatColor;
+    const isLikelyMobile =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(pointer: coarse)').matches ||
+        /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent ?? ''));
+    const useHQ = isWebGL2 && supportsHalfFloatColor && !isLikelyMobile;
+
+    // Sampleable depth attachment is only used by the AtmospherePass below
+    // for grain depth-masking. On the safe path we skip both the
+    // attachment and the pass — that removes the depth-attachment failure
+    // mode entirely, which is the root cause of the blank-cube symptom on
+    // mobile WebViews.
+    let depthTexture: THREE.DepthTexture | null = null;
+    if (useHQ) {
+      depthTexture = new THREE.DepthTexture(tw, th);
+      depthTexture.type   = THREE.UnsignedShortType;
+      depthTexture.format = THREE.DepthFormat;
+    }
 
     this.composerTarget = new THREE.WebGLRenderTarget(tw, th, {
-      samples:      useHQ ? 4 : 0,
-      type:         useHQ ? THREE.HalfFloatType : THREE.UnsignedByteType,
-      depthTexture,
+      samples: useHQ ? 4 : 0,
+      type:    useHQ ? THREE.HalfFloatType : THREE.UnsignedByteType,
+      ...(depthTexture ? { depthTexture } : {}),
     });
     this.composer = new EffectComposer(this.renderer, this.composerTarget);
     this.composer.setPixelRatio(dpr);
@@ -957,19 +978,25 @@ export class Renderer {
     // attached to the *current* readBuffer (which is what tDiffuse also
     // reads from). Both rt1 and rt2 carry a depthTexture (rt2 is a clone
     // of rt1), so readBuffer.depthTexture is always defined here.
-    this.atmospherePass = new ShaderPass(ATMOSPHERE_SHADER);
-    {
-      const u = this.atmospherePass.uniforms as Record<string, THREE.IUniform>;
-      u.uResolution.value.set(w, h);
-      u.tDepth.value = depthTexture; // initial value; updated per-frame below
+    //
+    // Skipped entirely on the safe path (no depth attachment available).
+    if (depthTexture) {
+      const depthTex = depthTexture;
+      const pass = new ShaderPass(ATMOSPHERE_SHADER);
+      {
+        const u = pass.uniforms as Record<string, THREE.IUniform>;
+        u.uResolution.value.set(w, h);
+        u.tDepth.value = depthTex; // initial value; updated per-frame below
+      }
+      const baseRender = pass.render.bind(pass);
+      pass.render = (renderer, writeBuffer, readBuffer, deltaTime, maskActive) => {
+        const u = pass.uniforms as Record<string, THREE.IUniform>;
+        u.tDepth.value = readBuffer.depthTexture ?? depthTex;
+        baseRender(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+      };
+      this.atmospherePass = pass;
+      this.composer.addPass(pass);
     }
-    const baseRender = this.atmospherePass.render.bind(this.atmospherePass);
-    this.atmospherePass.render = (renderer, writeBuffer, readBuffer, deltaTime, maskActive) => {
-      const u = this.atmospherePass.uniforms as Record<string, THREE.IUniform>;
-      u.tDepth.value = readBuffer.depthTexture ?? depthTexture;
-      baseRender(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
-    };
-    this.composer.addPass(this.atmospherePass);
 
     // Bokeh — focus, aperture, and maxblur are all updated per-frame in
     // tick() so the depth-of-field tracks the camera as the user zooms.
