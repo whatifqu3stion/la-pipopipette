@@ -336,9 +336,12 @@ export default function App() {
   // Root is position:fixed / inset:0 — avoids the iOS 100vh bug where the
   // browser toolbar eats into the viewport.
   //
-  // BOARD_BG_LAYERS provides the paper-with-vignette plate. The canvas
-  // below has alpha:true and a transparent clear color (see Renderer.ts),
-  // so the paper + vignette show through as the visible board surface.
+  // BOARD_BG_LAYERS provides a paper-with-vignette plate that's mostly
+  // hidden behind the WebGL canvas (which renders an opaque cream background
+  // — see Renderer.ts for why: BokehPass post-processing forces alpha=1.0).
+  // The plate still shows briefly during canvas init, and is the visible
+  // surface in the WebGL-fail fallback. The paper grain SVG and vignette
+  // overlay below sit ON TOP of the canvas to layer texture on the cube.
   // -------------------------------------------------------------------------
   return (
     <div style={{
@@ -375,6 +378,26 @@ export default function App() {
         </filter>
         <rect width="100%" height="100%" filter="url(#paper-grain)" />
       </svg>
+
+      {/* ── Vignette overlay ──
+           The WebGL canvas renders an opaque cream (BG_COLOR) because the
+           BokehPass post-process forces alpha=1.0 in its fragment shader,
+           which would otherwise make empty regions opaque black. To preserve
+           the corner darkening from the original paper-vignette CSS, we layer
+           a transparent-center radial gradient on top of the canvas here.
+           pointerEvents: 'none' keeps the canvas fully clickable. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position:       'absolute',
+          inset:          0,
+          width:          '100%',
+          height:         '100%',
+          pointerEvents:  'none',
+          zIndex:         2,
+          backgroundImage: PAPER_VIGNETTE,
+        }}
+      />
 
       {/* ── TOP BAR ── */}
       <div style={{

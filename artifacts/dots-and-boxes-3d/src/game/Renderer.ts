@@ -456,16 +456,20 @@ export class Renderer {
   // ---------------------------------------------------------------------------
   constructor(canvas: HTMLCanvasElement) {
     this.scene      = new THREE.Scene();
-    // Scene background stays unset (null). The WebGL canvas is rendered with
-    // a transparent clear color so the paper texture mounted on the page
-    // body in App.tsx becomes the visible board surface. Fog still fades
-    // cube fragments toward BG_COLOR (cream) — that cream then composites
-    // onto the paper texture, blending naturally with its average tone.
+    // Scene background is an opaque cream — the canvas itself reads as the
+    // paper surface. We can't rely on a transparent clear because the
+    // postprocessing pipeline (BokehPass) ALWAYS writes alpha = 1.0 in its
+    // fragment shader, which would force every empty pixel to opaque black
+    // and hide the page CSS underneath. Setting scene.background to BG_COLOR
+    // matches the page CSS bg exactly, and the SVG paper-grain overlay in
+    // App.tsx (mixBlendMode: multiply) supplies the fiber texture on top.
+    // Fog still fades cube fragments toward BG_COLOR for the depth fade.
     // Linear fog — initial range is a sensible default for the fallback
     // camera distance (~7 units). The actual near/far values are recomputed
     // every frame in tick() relative to the current camera distance, so the
     // fade always wraps the cube no matter how far the user has zoomed in.
-    this.scene.fog  = new THREE.Fog(BG_COLOR, 5, 9);
+    this.scene.fog        = new THREE.Fog(BG_COLOR, 5, 9);
+    this.scene.background = new THREE.Color(BG_COLOR);
 
     const w = canvas.clientWidth  || canvas.width  || 800;
     const h = canvas.clientHeight || canvas.height || 600;
@@ -474,12 +478,14 @@ export class Renderer {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias:       true,
-      alpha:           true, // transparent clear → page paper bg shows through
+      alpha:           true, // harmless; final composition is opaque (scene.background = cream)
       powerPreference: 'low-power',
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
-    this.renderer.setClearColor(0x000000, 0); // fully transparent clear
+    // Clear color is irrelevant since scene.background is set to an opaque
+    // cream — but kept defensively in case background is ever cleared.
+    this.renderer.setClearColor(BG_COLOR, 1);
     // Soft shadow map — used only by the accent light to drop a faint
     // smudge onto the implied floor below the cube. Cube content does not
     // self-shadow (out of scope); only the floor receives.
