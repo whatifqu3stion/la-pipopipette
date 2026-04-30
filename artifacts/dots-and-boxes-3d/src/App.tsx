@@ -21,35 +21,28 @@ const INK_FAINT = 'rgba(44,26,14,0.10)';
 // ---------------------------------------------------------------------------
 // Board background plate
 //
-// The visible board surface is built from three CSS background layers on the
+// The visible board surface is built from two CSS background layers on the
 // root container (the canvas mounts on top with a transparent clear color,
 // so this whole stack reads through as the playing surface):
 //
-//   1. radial-gradient vignette  — gentle warm-ink darkening at the corners
-//      so the eye is drawn to the cube in the center. Center is fully clear
-//      out past the cube's silhouette, then ramps softly to the edges. Sized
-//      to the viewport (100% 100%, no-repeat) so the wrap is consistent on
-//      any aspect ratio.
-//   2. paper-tile webp texture   — the visible fiber grain.
-//   3. solid BG cream            — fallback / base tone underneath the
+//   1. paper-tile webp texture   — the visible fiber grain.
+//   2. solid BG cream            — fallback / base tone underneath the
 //      texture's translucent fibers.
 //
+// A corner-darkening vignette used to live above this stack but was removed
+// because, on wide aspect ratios, the elliptical falloff caused the left/
+// right edges to read as a noticeably warmer yellow versus the center. The
+// background is now a uniform cream across the entire viewport.
+//
 // The fog target (BG_COLOR in Renderer.ts) is unchanged: back-facing edges
-// still fade toward the same cream that sits between paper and vignette,
-// so the existing depth fade behavior reads identically near the cube
-// (the cube sits in the center where the vignette is fully transparent).
+// still fade toward the same cream, so the existing depth fade reads the
+// same near the cube.
 // ---------------------------------------------------------------------------
-const PAPER_VIGNETTE =
-  'radial-gradient(ellipse at center, ' +
-    'rgba(44,26,14,0) 35%, ' +
-    'rgba(44,26,14,0.07) 70%, ' +
-    'rgba(44,26,14,0.20) 100%)';
 const BOARD_BG_LAYERS: React.CSSProperties = {
   backgroundColor:    BG,
-  backgroundImage:    `${PAPER_VIGNETTE}, url(${paperTexture})`,
-  backgroundRepeat:   'no-repeat, repeat',
-  backgroundSize:     '100% 100%, auto',
-  backgroundPosition: 'center center, 0 0',
+  backgroundImage:    `url(${paperTexture})`,
+  backgroundRepeat:   'repeat',
+  backgroundPosition: '0 0',
 };
 
 // Safe-area-aware padding helpers (CSS calc strings)
@@ -359,36 +352,15 @@ export default function App() {
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}
       />
 
-      {/* ── Vignette overlay ──
-           The WebGL canvas renders an opaque cream (BG_COLOR) because the
-           BokehPass post-process forces alpha=1.0 in its fragment shader,
-           which would otherwise make empty regions opaque black. To preserve
-           the corner darkening from the original paper-vignette CSS, we layer
-           a transparent-center radial gradient on top of the canvas here.
-           pointerEvents: 'none' keeps the canvas fully clickable. */}
-      <div
-        aria-hidden="true"
-        style={{
-          position:       'absolute',
-          inset:          0,
-          width:          '100%',
-          height:         '100%',
-          pointerEvents:  'none',
-          zIndex:         1,
-          backgroundImage: PAPER_VIGNETTE,
-        }}
-      />
-
       {/* ── Crumpled-paper overlay ──
-           A photo of crumpled paper layered over the entire board (canvas +
-           vignette) using `mix-blend-mode: multiply`. White areas of the
-           photo (most of it) leave the underlying pixels alone; the gray
-           crease shadows add subtle dark detail that reads as folded paper
-           catching light. Sized 'cover' so the crease pattern fills the
-           viewport without seams. Sits above the vignette so the creases
-           also accent the corner darkening, but below the UI (zIndex 10+)
-           so buttons and labels remain crisp. pointer-events: none keeps
-           the canvas fully interactive. */}
+           A photo of crumpled paper layered over the entire board (canvas)
+           using `mix-blend-mode: multiply`. White areas of the photo (most
+           of it) leave the underlying pixels alone; the gray crease shadows
+           add subtle dark detail that reads as folded paper catching light.
+           Sized 'cover' so the crease pattern fills the viewport without
+           seams. Sits below the UI (zIndex 10+) so buttons and labels
+           remain crisp. pointer-events: none keeps the canvas fully
+           interactive. */}
       <div
         aria-hidden="true"
         style={{
