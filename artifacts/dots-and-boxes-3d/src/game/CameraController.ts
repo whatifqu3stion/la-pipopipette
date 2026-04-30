@@ -23,11 +23,14 @@ const ZOOM_DEFAULT_FALLBACK = 7;
 const ZOOM_MIN_FALLBACK     = 4.5;
 const ZOOM_MAX_FALLBACK     = 13;
 
-// Fixed camera azimuth and elevation — in turntable mode the camera never
-// moves around the cube; it sits at this 3/4 view and the cube spins on
-// its own vertical axis instead. Pinch-zoom adjusts only the radius.
-const CAMERA_AZIMUTH   = Math.PI / 4; // diagonal corner view
-const CAMERA_ELEVATION = Math.PI / 4; // 45° down — true 3/4 view
+// Camera azimuth is fixed in turntable mode — the cube does the spinning
+// for left/right rotation. Elevation, however, is user-controllable via
+// vertical drag so they can tilt the view from near-side-on up to almost
+// top-down. Pinch-zoom adjusts the camera radius.
+const CAMERA_AZIMUTH       = Math.PI / 4;          // fixed diagonal corner view
+const ELEVATION_DEFAULT    = Math.PI / 4;          // 45° down — true 3/4 view
+const ELEVATION_MIN        = (10 * Math.PI) / 180; // ~10° — never dip below the floor
+const ELEVATION_MAX        = (80 * Math.PI) / 180; // ~80° — near top-down without gimbal flip
 
 const ROTATION_DURATION = 300; // ms — main sweep
 const SETTLE_DURATION   = 100; // ms — settle after overshoot
@@ -43,6 +46,11 @@ export class CameraController {
   // each frame (negated, see getCubeYaw). Starts at zero so the cube faces
   // its "home" orientation; snapping rests at multiples of STEP (90°).
   private currentAngle = 0;
+
+  // Camera elevation — adjusted by vertical drag, clamped between
+  // ELEVATION_MIN (near horizon) and ELEVATION_MAX (near top-down).
+  // Not snapped; the user is free to settle on any angle in range.
+  private currentElevation = ELEVATION_DEFAULT;
 
   // Dynamic zoom range — recomputed by setViewport() based on aspect ratio.
   private zoomDist     = ZOOM_DEFAULT_FALLBACK;
@@ -70,13 +78,14 @@ export class CameraController {
   }
 
   // ---------------------------------------------------------------------------
-  // Camera position update — only ever changes with zoom now. Azimuth and
-  // elevation are fixed in turntable mode (the cube does the rotating).
+  // Camera position update — driven by zoom (radius) and the user-controlled
+  // elevation. Azimuth is fixed in turntable mode (the cube does the
+  // horizontal rotating itself).
   // ---------------------------------------------------------------------------
   private updateCameraPosition() {
     const r  = this.zoomDist;
     const az = CAMERA_AZIMUTH;
-    const el = CAMERA_ELEVATION;
+    const el = this.currentElevation;
     this.camera.position.set(
       TARGET.x + r * Math.cos(el) * Math.sin(az),
       TARGET.y + r * Math.sin(el),
@@ -114,13 +123,22 @@ export class CameraController {
   }
 
   // ---------------------------------------------------------------------------
-  // Drag navigation — horizontal drag only. Vertical drag is intentionally
-  // NOT wired up: turntable feel means the cube spins on its vertical axis
-  // and the ground/shadow stay anchored at the bottom of the screen.
+  // Drag navigation.
+  //   dragBy         — horizontal drag spins the cube (turntable yaw).
+  //   dragByVertical — vertical drag tilts the camera elevation up/down,
+  //                    clamped so it never dips through the floor or flips
+  //                    over the top.
   // ---------------------------------------------------------------------------
   dragBy(deltaAngle: number) {
     if (this.isAnimating) return; // button rotation has priority
     this.currentAngle += deltaAngle;
+  }
+
+  dragByVertical(deltaElevation: number) {
+    if (this.isAnimating) return;
+    const next = this.currentElevation + deltaElevation;
+    this.currentElevation = Math.max(ELEVATION_MIN, Math.min(ELEVATION_MAX, next));
+    this.updateCameraPosition();
   }
 
   // ---------------------------------------------------------------------------
@@ -249,10 +267,11 @@ export class CameraController {
   }
 
   reset() {
-    this.currentAngle  = 0;
-    this.zoomDist      = this.zoomDefault;
-    this.hasUserZoomed = false;
-    this.isAnimating   = false;
+    this.currentAngle     = 0;
+    this.currentElevation = ELEVATION_DEFAULT;
+    this.zoomDist         = this.zoomDefault;
+    this.hasUserZoomed    = false;
+    this.isAnimating      = false;
     this.updateCameraPosition();
   }
 }

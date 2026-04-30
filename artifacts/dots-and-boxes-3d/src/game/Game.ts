@@ -98,12 +98,11 @@ export class Game {
         this.renderer.setHoveredEdge(null);
       }
       if (mouseDragging) {
-        // Turntable mode: horizontal drag spins the cube on its vertical
-        // axis. Vertical drag is intentionally ignored — the ground/shadow
-        // stay anchored at the bottom of the screen.
+        // Horizontal drag spins the cube (turntable yaw); vertical drag
+        // tilts the camera elevation. Negate dy so dragging up tilts the
+        // view more top-down — matches the convention used in 3D editors.
         this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
-        // Suppress unused-vertical-delta warning without touching the var.
-        void dy;
+        this.cameraCtrl.dragByVertical(-dy * DRAG_FACTOR);
       } else {
         this.inputCtrl.handleMove(e.clientX, e.clientY);
       }
@@ -190,10 +189,10 @@ export class Game {
           this.renderer.setHoveredEdge(null);
         }
         if (touchDragging) {
-          // Turntable mode: horizontal drag spins the cube on its vertical
-          // axis. Vertical drag is intentionally ignored.
+          // Horizontal swipe spins the cube; vertical swipe tilts the
+          // camera elevation (negated so swiping up = look more top-down).
           this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
-          void dy;
+          this.cameraCtrl.dragByVertical(-dy * DRAG_FACTOR);
         } else {
           this.inputCtrl.handleMove(t.clientX, t.clientY);
         }
