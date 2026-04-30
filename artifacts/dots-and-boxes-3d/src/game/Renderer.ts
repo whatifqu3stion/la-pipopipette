@@ -12,9 +12,9 @@ const PLAYER_COLORS: Record<string, number> = {
 
 const BG_COLOR      = 0xf5f0e8; // warm off-white paper
 const NEUTRAL_COLOR = 0xb8aa98; // warm gray — used for corner dots
-// Neutral edge color: NEUTRAL_COLOR lerped 25% toward BG so the wires
-// between nodes recede further than the dots themselves.
-const NEUTRAL_EDGE_COLOR = 0xc7bcac;
+// Neutral edge color: faded further toward the paper BG so the wires
+// between nodes read as ghostly guides rather than solid lines.
+const NEUTRAL_EDGE_COLOR = 0xded6ca;
 
 // Completed cube cage: player hue lightened ~40% toward white
 const COMPLETED_COLOR: Record<string, number> = {
