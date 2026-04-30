@@ -2,9 +2,23 @@ import * as THREE from 'three';
 
 const TARGET = new THREE.Vector3(1, 1, 1);
 
-const ZOOM_DEFAULT = 7;
-const ZOOM_MIN     = 4.5;  // can't go inside the structure
-const ZOOM_MAX     = 13;   // board always visible
+// Bounding sphere radius that comfortably contains the 2×2×2 cube
+// (half diagonal = sqrt(3) ≈ 1.732) plus padding for the corner dots & edges.
+const CUBE_BOUND_R = 2.05;
+
+// Pixels of viewport vertical space reserved for the top + bottom UI bars.
+// The cube renders centered in the canvas, so we shrink the "usable" height
+// when computing fit distance to make sure the cube clears both bars.
+const UI_RESERVE_PX = 170;
+
+// Hard floors / ceilings so the camera never gets absurd at edge cases.
+const ZOOM_MIN_FLOOR   = 3.5;
+const ZOOM_MAX_CEILING = 22;
+
+// Fallback values used before the first setViewport() call.
+const ZOOM_DEFAULT_FALLBACK = 7;
+const ZOOM_MIN_FALLBACK     = 4.5;
+const ZOOM_MAX_FALLBACK     = 13;
 
 // 45° elevation: true 3/4 view — interior structure clearly visible
 const CAMERA_ELEVATION = Math.PI / 4;
@@ -21,7 +35,17 @@ export class CameraController {
   private camera: THREE.PerspectiveCamera;
 
   private currentAngle = DIAGONAL_START;
-  private zoomDist     = ZOOM_DEFAULT;
+
+  // Dynamic zoom range — recomputed by setViewport() based on aspect ratio.
+  private zoomDist     = ZOOM_DEFAULT_FALLBACK;
+  private zoomDefault  = ZOOM_DEFAULT_FALLBACK;
+  private zoomMin      = ZOOM_MIN_FALLBACK;
+  private zoomMax      = ZOOM_MAX_FALLBACK;
+
+  // Track whether the user has pinched/zoomed since the last reset.  If they
+  // have, viewport changes preserve their zoom (clamped to the new range);
+  // otherwise we re-fit to the new default.
+  private hasUserZoomed = false;
 
   // Animation
   private isAnimating      = false;
@@ -98,7 +122,54 @@ export class CameraController {
   // Pinch zoom — factor > 1 means fingers spreading (zoom in = shorter distance)
   // ---------------------------------------------------------------------------
   zoom(factor: number) {
-    this.zoomDist = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, this.zoomDist / factor));
+    this.hasUserZoomed = true;
+    this.zoomDist = Math.max(this.zoomMin, Math.min(this.zoomMax, this.zoomDist / factor));
+    this.updateCameraPosition();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Viewport sync — call from the ResizeObserver.  Computes a fit distance
+  // that keeps the cube fully visible *and* clear of the top/bottom UI bars
+  // for the given canvas size.  Updates default/min/max zoom accordingly and
+  // re-fits the current zoom if the user hasn't manually pinched yet.
+  // ---------------------------------------------------------------------------
+  setViewport(width: number, height: number) {
+    if (width <= 0 || height <= 0) return;
+
+    const halfFovV = (this.camera.fov * Math.PI / 180) / 2;
+    const tanHalfV = Math.tan(halfFovV);
+    const aspect   = width / height;
+
+    // Horizontal fit: hfov = 2 * atan(tan(vfov/2) * aspect)
+    // Distance to fit a sphere of radius R horizontally: R / (tanHalfV * aspect)
+    const distH = CUBE_BOUND_R / (tanHalfV * Math.max(0.1, aspect));
+
+    // Vertical fit: shrink the usable height by the UI-bar reserve so the cube
+    // doesn't render behind the floating top/bottom bars.  Cube renders centered
+    // in the canvas, so the *effective* vertical FOV the cube can occupy is
+    // (usableH / fullH) of the total — we boost the distance by the inverse.
+    const usableH    = Math.max(120, height - UI_RESERVE_PX);
+    const heightBoost = height / usableH;
+    const distV       = (CUBE_BOUND_R / tanHalfV) * heightBoost;
+
+    const fitDist = Math.max(distH, distV);
+
+    // Default sits a little above fit so there's a small frame around the cube.
+    this.zoomDefault = fitDist * 1.05;
+
+    // Allow the user to zoom in moderately closer than fit, but never inside
+    // the structure.  Allow zooming out to ~1.6× fit for context views.
+    this.zoomMin = Math.max(ZOOM_MIN_FLOOR,   fitDist * 0.55);
+    this.zoomMax = Math.min(ZOOM_MAX_CEILING, Math.max(fitDist * 1.6, this.zoomDefault + 4));
+
+    // If the user hasn't pinch-zoomed yet, snap to the new default; otherwise
+    // just clamp their existing zoom into the new valid range.
+    if (!this.hasUserZoomed) {
+      this.zoomDist = this.zoomDefault;
+    } else {
+      this.zoomDist = Math.max(this.zoomMin, Math.min(this.zoomMax, this.zoomDist));
+    }
+
     this.updateCameraPosition();
   }
 
@@ -154,7 +225,8 @@ export class CameraController {
 
   reset() {
     this.currentAngle    = DIAGONAL_START;
-    this.zoomDist        = ZOOM_DEFAULT;
+    this.zoomDist        = this.zoomDefault;
+    this.hasUserZoomed   = false;
     this.isAnimating     = false;
     this.updateCameraPosition();
   }

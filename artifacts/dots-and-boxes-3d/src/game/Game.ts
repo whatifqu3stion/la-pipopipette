@@ -220,12 +220,28 @@ export class Game {
     });
 
     // ── Resize ────────────────────────────────────────────────────────────
+    // Both the renderer (canvas size + projection aspect) and the camera
+    // controller (fit-distance + zoom range) need to react to viewport
+    // changes — so the cube always fits cleanly between the floating UI bars
+    // on any screen from a 320 px phone to a 4K desktop.
     const ro = new ResizeObserver(() => {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
-      if (w > 0 && h > 0) this.renderer.resize(w, h);
+      if (w > 0 && h > 0) {
+        this.renderer.resize(w, h);
+        this.cameraCtrl.setViewport(w, h);
+      }
     });
     ro.observe(canvas);
+
+    // Initial fit — ResizeObserver fires async, so do one synchronous pass
+    // here so the very first frame already has a sensible camera distance.
+    const w0 = canvas.clientWidth;
+    const h0 = canvas.clientHeight;
+    if (w0 > 0 && h0 > 0) {
+      this.renderer.resize(w0, h0);
+      this.cameraCtrl.setViewport(w0, h0);
+    }
   }
 
   private startLoop() {
