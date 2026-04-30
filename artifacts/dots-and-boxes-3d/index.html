@@ -55,6 +55,13 @@
           // into the canvas, away from the screen edge). Round those two
           // corners; leave the now-visible right side flush.
           s.setProperty('border-radius',    '0 0 12px 12px',                        'important');
+          // Defence-in-depth against accidental hides — if any extension
+          // or future style tries to suppress the tab via display /
+          // visibility / opacity, our !important values win.
+          s.setProperty('display',          'inline-block',                         'important');
+          s.setProperty('visibility',       'visible',                              'important');
+          s.setProperty('opacity',          '1',                                    'important');
+          s.setProperty('pointer-events',   'auto',                                 'important');
         }
         function bindResize() {
           // Re-measure on viewport changes so the right-edge flush stays
@@ -65,21 +72,46 @@
             raf = requestAnimationFrame(function () { raf = 0; applyStyles(); });
           });
         }
+        function ensureLastChild() {
+          // Re-appending an existing node moves it. Putting the badge
+          // last in <body> means that when two siblings tie on z-index
+          // (or both rely on auto stacking), document order resolves the
+          // tie in our favour — so the badge wins paint order against
+          // anything later code or extensions might inject.
+          if (anchor && anchor.parentNode === document.body &&
+              document.body.lastElementChild !== anchor) {
+            document.body.appendChild(anchor);
+          }
+        }
         function tryClaim() {
           var a = document.querySelector('a[href="https://vibej.am/"]');
           if (!a) return false;
           anchor = a;
+          ensureLastChild();
           applyStyles();
           bindResize();
           return true;
         }
         function init() {
-          if (tryClaim()) return;
+          if (tryClaim()) {
+            // Keep the anchor pinned to last-child position even if other
+            // scripts append nodes to <body> later (e.g. injected over-
+            // lays from browser extensions). Cheap: only acts when a new
+            // last child appears.
+            new MutationObserver(ensureLastChild)
+              .observe(document.body, { childList: true });
+            return;
+          }
           // Anchor not in DOM yet — watch for it. We observe <body>
           // (where the widget appends) for added subtrees and re-check
-          // on each batch. Disconnect the moment we find it.
+          // on each batch. Once found, switch to the lighter "keep last
+          // child" observer above by recursing into init().
           var obs = new MutationObserver(function () {
-            if (tryClaim()) obs.disconnect();
+            if (tryClaim()) {
+              obs.disconnect();
+              new MutationObserver(ensureLastChild)
+                .observe(document.body, { childList: true });
+            }
           });
           obs.observe(document.body, { childList: true, subtree: true });
         }
