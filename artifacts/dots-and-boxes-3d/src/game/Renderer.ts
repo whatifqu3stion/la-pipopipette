@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass }     from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { BokehPass }      from 'three/examples/jsm/postprocessing/BokehPass.js';
+import { OutputPass }     from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { edgeKey, faceKey, cubeKey } from './GameModel';
 import type { EdgeState, FaceState, CubeState } from './types';
 
@@ -213,6 +217,14 @@ export class Renderer {
   // Camera-relative rim/back light (position updated every frame)
   private rimLight!: THREE.DirectionalLight;
 
+  // Postprocessing — provides a real lens-style depth-of-field blur via
+  // BokehPass. The pass's `focus` uniform is updated every frame in tick()
+  // to follow the camera's distance to the cube center, so the focal plane
+  // sits on the cube no matter how far in/out the user has zoomed.
+  private composer!: EffectComposer;
+  private bokehPass!: BokehPass;
+  private composerTarget!: THREE.WebGLRenderTarget;
+
   // Interaction state
   private hoveredEdgeKey:    string | null = null;
   private lastPlacedEdgeKey: string | null = null;
@@ -235,11 +247,11 @@ export class Renderer {
   constructor(canvas: HTMLCanvasElement) {
     this.scene      = new THREE.Scene();
     this.scene.background = new THREE.Color(BG_COLOR);
-    // Tightened linear fog — fades back-of-cube elements toward the paper
-    // background so depth is read as brightness/clarity rather than thickness.
-    // At default zoom (~7 units): front of cube ≈ 5u from camera (no fog),
-    // back of cube ≈ 8.5u (≈45% fog mix toward BG).
-    this.scene.fog  = new THREE.Fog(BG_COLOR, 6, 11.5);
+    // Linear fog — initial range is a sensible default for the fallback
+    // camera distance (~7 units). The actual near/far values are recomputed
+    // every frame in tick() relative to the current camera distance, so the
+    // fade always wraps the cube no matter how far the user has zoomed in.
+    this.scene.fog  = new THREE.Fog(BG_COLOR, 5, 9);
 
     const w = canvas.clientWidth  || canvas.width  || 800;
     const h = canvas.clientHeight || canvas.height || 600;
@@ -281,7 +293,7 @@ export class Renderer {
       roughness:         0.30,
       metalness:         0,
       emissive:          new THREE.Color(0xb06010),
-      emissiveIntensity: 0.30,
+      emissiveIntensity: 0.20,
     });
     this.matPlayerA = new THREE.MeshStandardMaterial({
       color: PLAYER_COLORS.A, roughness: 0.60, metalness: 0.05,
@@ -301,14 +313,14 @@ export class Renderer {
       roughness:         0.40,
       metalness:         0.05,
       emissive:          new THREE.Color(PLAYER_COLORS.A),
-      emissiveIntensity: 0.35,
+      emissiveIntensity: 0.22,
     });
     this.matGlowB = new THREE.MeshStandardMaterial({
       color:             PLAYER_COLORS.B,
       roughness:         0.40,
       metalness:         0.05,
       emissive:          new THREE.Color(PLAYER_COLORS.B),
-      emissiveIntensity: 0.35,
+      emissiveIntensity: 0.22,
     });
     // Traveling draw-in highlight — bright, high-emissive, small sphere.
     // Light tint of the player hue so the spark reads as "their color" but
@@ -318,14 +330,14 @@ export class Renderer {
       roughness:         0.15,
       metalness:         0,
       emissive:          new THREE.Color(PLAYER_COLORS.A),
-      emissiveIntensity: 1.1,
+      emissiveIntensity: 0.7,
     });
     this.matHighlightB = new THREE.MeshStandardMaterial({
       color:             0xffb8b8,
       roughness:         0.15,
       metalness:         0,
       emissive:          new THREE.Color(PLAYER_COLORS.B),
-      emissiveIntensity: 1.1,
+      emissiveIntensity: 0.7,
     });
     this.matPoint = new THREE.MeshStandardMaterial({
       color: NEUTRAL_COLOR, roughness: 0.88, metalness: 0,
@@ -333,6 +345,46 @@ export class Renderer {
 
     this.setupLighting();
     this.setupCamera();
+    this.setupPostprocessing(w, h);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Postprocessing pipeline:
+  //   RenderPass (scene → MSAA target)
+  //   BokehPass  (lens-style depth-of-field blur, focus tracks camera)
+  //   OutputPass (linear → sRGB conversion at the very end)
+  //
+  // The composer's render target is multisampled (samples = 4 on WebGL2) so
+  // we don't lose antialiasing by going through postprocessing.
+  // ---------------------------------------------------------------------------
+  private setupPostprocessing(w: number, h: number) {
+    const dpr = this.renderer.getPixelRatio();
+    this.composerTarget = new THREE.WebGLRenderTarget(
+      Math.max(1, Math.floor(w * dpr)),
+      Math.max(1, Math.floor(h * dpr)),
+      { samples: 4, type: THREE.HalfFloatType },
+    );
+    this.composer = new EffectComposer(this.renderer, this.composerTarget);
+    this.composer.setPixelRatio(dpr);
+    this.composer.setSize(w, h);
+
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+
+    // Bokeh — focus is set per-frame in tick() so it follows the cube.
+    // Aperture controls how strong the blur grows with distance from focus;
+    // maxblur clamps the total blur radius (in normalized screen units).
+    this.bokehPass = new BokehPass(this.scene, this.camera, {
+      focus:    7,        // overwritten per-frame
+      aperture: 0.0018,   // moderate — soft, lens-like
+      maxblur:  0.012,    // visible but not destructive to readability
+    });
+    // BokehPass shader takes aspect from a uniform; keep it in sync on resize.
+    (this.bokehPass.uniforms as Record<string, THREE.IUniform>).aspect.value = w / h;
+    this.composer.addPass(this.bokehPass);
+
+    // Linear → sRGB conversion (required when going through postprocessing
+    // since intermediate buffers are linear-space).
+    this.composer.addPass(new OutputPass());
   }
 
   // ---------------------------------------------------------------------------
@@ -341,24 +393,26 @@ export class Renderer {
     // ambient + bounce pair: hemisphere illumination is naturally direction-
     // aware (sky color from above, ground color from below) so the scene reads
     // well even when the camera rotates to view the cube from below.
-    this.scene.add(new THREE.HemisphereLight(0xfff5e0, 0xe8d8c0, 0.55));
+    // All intensities pulled back ~25–30% so the player hues read calmer —
+    // the previous setup was washing the saturated blue/red into "too hot".
+    this.scene.add(new THREE.HemisphereLight(0xfff5e0, 0xe8d8c0, 0.40));
 
     // Primary key — warm directional from upper-front. Defines main form
     // and gives front-facing surfaces visibly higher brightness than back.
-    const key = new THREE.DirectionalLight(0xfff8ec, 0.55);
+    const key = new THREE.DirectionalLight(0xfff8ec, 0.40);
     key.position.set(5, 8, 4);
     this.scene.add(key);
 
     // Cool fill from the opposite side — soft counter that prevents shadows
     // from going completely flat without competing with the key.
-    const fill = new THREE.DirectionalLight(0xdde8ff, 0.18);
+    const fill = new THREE.DirectionalLight(0xdde8ff, 0.13);
     fill.position.set(-4, 3, -3);
     this.scene.add(fill);
 
     // Camera-relative rim light — its position is updated every frame in
     // tick() to sit opposite the camera, so it always silhouettes the back
     // of the structure and helps separate edges from the paper background.
-    this.rimLight = new THREE.DirectionalLight(0xeaf2ff, 0.30);
+    this.rimLight = new THREE.DirectionalLight(0xeaf2ff, 0.20);
     this.rimLight.position.set(-5, 3, -5);
     this.scene.add(this.rimLight);
     this.scene.add(this.rimLight.target); // required so position changes take effect
@@ -723,11 +777,33 @@ export class Renderer {
   // ---------------------------------------------------------------------------
   // Main loop — called every frame from Game.ts instead of render()
   // ---------------------------------------------------------------------------
+  // Reusable scratch — distance-to-target lookup used every frame
+  private static readonly TICK_TARGET = new THREE.Vector3(1, 1, 1);
+
   tick(now: number) {
     this.tickEdgeAnims(now);
     this.tickCubeAnims(now);
     this.updateRimLight();
-    this.renderer.render(this.scene, this.camera);
+
+    // Distance from camera to cube center — used for both dynamic fog and
+    // the depth-of-field focal plane.  Recomputed every frame so the depth
+    // cues track the user's pinch-zoom in real time.
+    const camDist = this.camera.position.distanceTo(Renderer.TICK_TARGET);
+
+    // Dynamic fog: always wraps the cube. The cube extends ±~1.73 from the
+    // center (sphere bound), so we start the fog ~1.5 units in front of
+    // center and finish it ~3.5 units behind — keeping the front of the
+    // cube crisp and the back fading toward paper white at any zoom level.
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = Math.max(0.5, camDist - 1.5);
+    fog.far  = camDist + 3.5;
+
+    // Bokeh focal plane sits slightly forward of the cube center so the front
+    // edges read razor-sharp and the back edges get the most blur.
+    (this.bokehPass.uniforms as Record<string, THREE.IUniform>).focus.value =
+      Math.max(0.1, camDist - 0.6);
+
+    this.composer.render();
   }
 
   // ---------------------------------------------------------------------------
@@ -737,6 +813,15 @@ export class Renderer {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
+
+    // Postprocessing pipeline must follow the canvas size, including the
+    // bokeh shader's aspect uniform — without this the DoF blur skews
+    // horizontally on portrait phones / vertically on ultrawides.
+    if (this.composer) {
+      this.composer.setSize(width, height);
+      (this.bokehPass.uniforms as Record<string, THREE.IUniform>).aspect.value =
+        width / height;
+    }
   }
 
   dispose() {
@@ -749,6 +834,7 @@ export class Renderer {
     this.geoHoverEdge.dispose();
     this.geoHighlight.dispose();
     this.geoPoint.dispose();
+    this.composerTarget?.dispose();
     this.renderer.dispose();
   }
 }

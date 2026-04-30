@@ -11,9 +11,12 @@ const CUBE_BOUND_R = 2.05;
 // when computing fit distance to make sure the cube clears both bars.
 const UI_RESERVE_PX = 170;
 
-// Hard floors / ceilings so the camera never gets absurd at edge cases.
-const ZOOM_MIN_FLOOR   = 3.5;
-const ZOOM_MAX_CEILING = 22;
+// Hard floors so the camera never sits inside the structure.
+const ZOOM_MIN_FLOOR = 3.5;
+// Maximum zoom-out is a *relative* multiplier of the per-viewport fit distance
+// — no absolute ceiling. This guarantees the cube is always visibly larger
+// than ~70% of its fit-size, so the user can never zoom out to "lose" it.
+const ZOOM_MAX_FIT_MULTIPLIER = 1.35;
 
 // Fallback values used before the first setViewport() call.
 const ZOOM_DEFAULT_FALLBACK = 7;
@@ -198,9 +201,11 @@ export class CameraController {
     this.zoomDefault = fitDist * 1.05;
 
     // Allow the user to zoom in moderately closer than fit, but never inside
-    // the structure.  Allow zooming out to ~1.6× fit for context views.
-    this.zoomMin = Math.max(ZOOM_MIN_FLOOR,   fitDist * 0.55);
-    this.zoomMax = Math.min(ZOOM_MAX_CEILING, Math.max(fitDist * 1.6, this.zoomDefault + 4));
+    // the structure.  Zoom-out is capped at a *relative* multiplier of the
+    // fit distance so the cube always stays comfortably visible — never
+    // letting the user pinch out into "where is the cube?" territory.
+    this.zoomMin = Math.max(ZOOM_MIN_FLOOR, fitDist * 0.55);
+    this.zoomMax = fitDist * ZOOM_MAX_FIT_MULTIPLIER;
 
     // If the user hasn't pinch-zoomed yet, snap to the new default; otherwise
     // just clamp their existing zoom into the new valid range.
