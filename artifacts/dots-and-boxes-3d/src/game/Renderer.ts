@@ -50,6 +50,17 @@ const EDGE_ANIM_MS = 840;  // edge draw-in duration (ms) — paced like a hand s
 const EDGE_GLOW_MS = 350;  // post-draw emphasis duration (ms)
 const CUBE_ANIM_MS = 400;  // cube scale-in duration (ms)
 
+// Glow swell that masks the wavy → straight geometry snap.
+// During the last (1 - GLOW_SWELL_START_FRAC) of the draw, the stroke's
+// emissive intensity ramps from BASE up to PEAK so it's visibly aglow at
+// the moment the geometry snaps to the clean line — the brighter pulse
+// distracts the eye from the geometric change. After the snap the glow
+// decays smoothly back to 0 across EDGE_GLOW_MS, then the stroke settles
+// to its non-emissive resting material.
+const GLOW_INTENSITY_BASE   = 0.22; // matches matGlow's resting intensity
+const GLOW_INTENSITY_PEAK   = 0.55; // peak right at the snap
+const GLOW_SWELL_START_FRAC = 0.55; // begin ramping at 55% through the draw
+
 // ---------------------------------------------------------------------------
 // Opacity values
 // ---------------------------------------------------------------------------
@@ -491,6 +502,12 @@ interface EdgeAnimState {
   owner:     'A' | 'B';
   startTime: number;
   sketch:    EdgeSketchData;
+  // Per-anim clone of matGlowA/B so we can mutate emissiveIntensity
+  // without affecting other in-flight glowing edges.
+  mat:       THREE.MeshStandardMaterial;
+  // Set when raw draw progress hits 1 (geometry has snapped to straight).
+  // From this point we are in the post-snap glow-decay phase.
+  snapTime:  number | null;
   highlight: THREE.Mesh;    // traveling spark — removed from scene on completion
 }
 
@@ -557,7 +574,6 @@ export class Renderer {
   // Interaction state
   private hoveredEdgeKey:    string | null = null;
   private lastPlacedEdgeKey: string | null = null;
-  private lastPlacedTimer    = 0;
 
   // Per-edge sketch data (curve + tube geometries for all four tiers).
   // Built at initEdges time, static thereafter.
@@ -1142,12 +1158,20 @@ export class Renderer {
       this.scene.remove(prev.highlight);
       // Restore drawRange on whatever geometry the previous anim was using
       prev.sketch.geoOwned.drawRange.count = Infinity;
+      // Free the previous anim's cloned material so it doesn't leak GPU resources
+      prev.mat.dispose();
       this.edgeAnims.delete(key);
     }
 
+    // Clone the glow material so this animation can swell its emissive
+    // intensity without affecting other in-flight glowing strokes.
+    const sourceMat = owner === 'A' ? this.matGlowA : this.matGlowB;
+    const animMat = sourceMat.clone();
+    animMat.emissiveIntensity = GLOW_INTENSITY_BASE;
+
     // Apply draw material immediately and clamp drawRange to the very start
     mesh.geometry = sketch.geoOwned;
-    mesh.material = owner === 'A' ? this.matGlowA : this.matGlowB;
+    mesh.material = animMat;
     sketch.geoOwned.drawRange.start = 0;
     sketch.geoOwned.drawRange.count = 0;
 
@@ -1160,7 +1184,12 @@ export class Renderer {
     this.scene.add(highlight);
 
     this.edgeAnims.set(key, {
-      owner, startTime: performance.now(), sketch, highlight,
+      owner,
+      startTime: performance.now(),
+      sketch,
+      mat:       animMat,
+      snapTime:  null,
+      highlight,
     });
   }
 
@@ -1168,14 +1197,16 @@ export class Renderer {
   clearLastPlaced() {
     // Cancel all in-flight edge animations and restore their owned-tier
     // drawRange so any future render of that geometry shows the full stroke.
+    // Also dispose each anim's per-edge cloned glow material — updateEdgeStates
+    // will assign a fresh shared material on the next frame.
     for (const [, anim] of this.edgeAnims) {
       this.scene.remove(anim.highlight);
       anim.sketch.geoOwned.drawRange.start = 0;
       anim.sketch.geoOwned.drawRange.count = Infinity;
+      anim.mat.dispose();
     }
     this.edgeAnims.clear();
 
-    // Clear glow timer; the timeout callback checks lastPlacedEdgeKey before acting
     this.lastPlacedEdgeKey = null;
   }
 
@@ -1197,48 +1228,75 @@ export class Renderer {
       const mesh = this.edgeMeshes.get(key);
       if (!mesh) { this.edgeAnims.delete(key); continue; }
 
-      const raw = Math.min((now - anim.startTime) / EDGE_ANIM_MS, 1);
-      const p   = easeInOutCubic(raw);
+      // ──────────────────────────────────────────────────────────────────
+      // Phase 1: pre-snap — wavy stroke drawing in
+      // ──────────────────────────────────────────────────────────────────
+      if (anim.snapTime === null) {
+        const raw = Math.min((now - anim.startTime) / EDGE_ANIM_MS, 1);
+        const p   = easeInOutCubic(raw);
 
-      // Reveal the leading portion of the tube along its curve. drawRange
-      // operates on indices, and TubeGeometry emits SKETCH_RADIAL * 6 indices
-      // per tubular ring — so revealing N rings means N * SKETCH_RADIAL * 6
-      // indices, walking the stroke smoothly from start to end.
-      const ringsRevealed = Math.max(0, Math.floor(SKETCH_TUBULAR * p));
-      anim.sketch.geoOwned.drawRange.count = ringsRevealed * SKETCH_RADIAL * 6;
+        // Reveal the leading portion of the tube along its curve. drawRange
+        // operates on indices, and TubeGeometry emits SKETCH_RADIAL * 6
+        // indices per tubular ring — revealing N rings means N * SKETCH_RADIAL
+        // * 6 indices, walking the stroke smoothly from start to end.
+        const ringsRevealed = Math.max(0, Math.floor(SKETCH_TUBULAR * p));
+        anim.sketch.geoOwned.drawRange.count = ringsRevealed * SKETCH_RADIAL * 6;
 
-      // Highlight spark slides straight from start dot to end dot. The
-      // wavy stroke's wobble amplitude is sub-pixel at default zoom, so a
-      // straight lerp is visually indistinguishable from following the
-      // curve — and it sidesteps a three.js CatmullRom getPoint failure
-      // mode that previously crashed on every click.
-      anim.highlight.position
-        .copy(anim.sketch.startPos)
-        .lerp(anim.sketch.endPos, p);
+        // Highlight spark slides straight from start dot to end dot. The
+        // wavy stroke's wobble amplitude is sub-pixel at default zoom, so a
+        // straight lerp is visually indistinguishable from following the
+        // curve — and it sidesteps a three.js CatmullRom getPoint failure
+        // mode that previously crashed on every click.
+        anim.highlight.position
+          .copy(anim.sketch.startPos)
+          .lerp(anim.sketch.endPos, p);
 
-      if (raw >= 1) {
-        // Animation complete — restore the wavy geo's draw range so any
-        // future re-use (undo + replay) starts clean, then snap the visible
-        // mesh to the shared straight cylinder. The stroke "settles" from
-        // organic ink into a clean grid mark right as the spark arrives.
-        anim.sketch.geoOwned.drawRange.count = Infinity;
-        mesh.geometry = this.geoStraightOwned;
+        // Glow swell: emissive intensity stays at BASE for the first
+        // GLOW_SWELL_START_FRAC of the draw, then ramps smoothly up to
+        // PEAK so it's visibly aglow at the snap instant. The brighter
+        // pulse softens the perceptual "pop" from wavy → straight.
+        if (raw < GLOW_SWELL_START_FRAC) {
+          anim.mat.emissiveIntensity = GLOW_INTENSITY_BASE;
+        } else {
+          const swellRaw = (raw - GLOW_SWELL_START_FRAC) / (1 - GLOW_SWELL_START_FRAC);
+          const swell    = easeInOutCubic(swellRaw);
+          anim.mat.emissiveIntensity =
+            GLOW_INTENSITY_BASE + (GLOW_INTENSITY_PEAK - GLOW_INTENSITY_BASE) * swell;
+        }
 
-        this.scene.remove(anim.highlight);
-        this.edgeAnims.delete(key);
+        if (raw >= 1) {
+          // Snap! Restore the wavy geo's draw range (so any future re-use
+          // starts clean), swap the visible mesh to the shared straight
+          // cylinder, hold the glow at peak, retire the spark, and enter
+          // the post-snap decay phase. The peak glow continues for a beat
+          // so the eye reads the snap as "pen finishing the stroke" rather
+          // than "geometry replaced".
+          anim.sketch.geoOwned.drawRange.count = Infinity;
+          mesh.geometry = this.geoStraightOwned;
+          this.scene.remove(anim.highlight);
+          anim.mat.emissiveIntensity = GLOW_INTENSITY_PEAK;
+          anim.snapTime = now;
+          // For other systems that key off "the most recently placed edge"
+          this.lastPlacedEdgeKey = key;
+        }
 
-        // Begin the post-placement glow phase
-        window.clearTimeout(this.lastPlacedTimer);
-        this.lastPlacedEdgeKey = key;
+      // ──────────────────────────────────────────────────────────────────
+      // Phase 2: post-snap — glow decays from PEAK back to 0 over EDGE_GLOW_MS
+      // ──────────────────────────────────────────────────────────────────
+      } else {
+        const gp = Math.min((now - anim.snapTime) / EDGE_GLOW_MS, 1);
+        // Smooth decay curve (ease-out so the tail is gentle)
+        const decay = 1 - easeInOutCubic(gp);
+        anim.mat.emissiveIntensity = GLOW_INTENSITY_PEAK * decay;
 
-        this.lastPlacedTimer = window.setTimeout(() => {
-          if (this.lastPlacedEdgeKey !== key) return;
-          const m = this.edgeMeshes.get(key);
-          if (m) {
-            m.material = anim.owner === 'A' ? this.matPlayerA : this.matPlayerB;
-          }
-          this.lastPlacedEdgeKey = null;
-        }, EDGE_GLOW_MS);
+        if (gp >= 1) {
+          // Glow finished — settle to the resting (non-emissive) material
+          // and free the per-anim material clone.
+          mesh.material = anim.owner === 'A' ? this.matPlayerA : this.matPlayerB;
+          anim.mat.dispose();
+          if (this.lastPlacedEdgeKey === key) this.lastPlacedEdgeKey = null;
+          this.edgeAnims.delete(key);
+        }
       }
     }
   }
@@ -1319,8 +1377,10 @@ export class Renderer {
   }
 
   dispose() {
-    window.clearTimeout(this.lastPlacedTimer);
-    for (const anim of this.edgeAnims.values()) this.scene.remove(anim.highlight);
+    for (const anim of this.edgeAnims.values()) {
+      this.scene.remove(anim.highlight);
+      anim.mat.dispose();
+    }
     this.edgeAnims.clear();
     // Per-edge sketch geometries (4 tubes per edge)
     for (const sketch of this.edgeSketches.values()) {
