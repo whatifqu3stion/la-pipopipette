@@ -99,10 +99,11 @@ export class Game {
       }
       if (mouseDragging) {
         // Horizontal drag spins the cube (turntable yaw); vertical drag
-        // tilts the camera elevation. Negate dy so dragging up tilts the
-        // view more top-down — matches the convention used in 3D editors.
+        // tilts the camera elevation. Pass dy as-is so dragging *down*
+        // tips the cube's top toward the viewer (reveals the top face),
+        // and dragging up reveals more of the side.
         this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
-        this.cameraCtrl.dragByVertical(-dy * DRAG_FACTOR);
+        this.cameraCtrl.dragByVertical(dy * DRAG_FACTOR);
       } else {
         this.inputCtrl.handleMove(e.clientX, e.clientY);
       }
@@ -190,9 +191,9 @@ export class Game {
         }
         if (touchDragging) {
           // Horizontal swipe spins the cube; vertical swipe tilts the
-          // camera elevation (negated so swiping up = look more top-down).
+          // camera elevation. Swipe down = peek at the top of the cube.
           this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
-          this.cameraCtrl.dragByVertical(-dy * DRAG_FACTOR);
+          this.cameraCtrl.dragByVertical(dy * DRAG_FACTOR);
         } else {
           this.inputCtrl.handleMove(t.clientX, t.clientY);
         }
