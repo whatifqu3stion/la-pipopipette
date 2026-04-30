@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from './game/Game';
 import type { Owner } from './game/types';
 
-// PRD player colors
+// Player colors — matched to the in-game palette in Renderer.ts so the UI
+// dots, score panels, and turn pulse all read as the same hue as the lines.
 const PLAYER_COLORS: Record<string, string> = {
-  A: '#3a6ea5',
-  B: '#c75c5c',
+  A: '#2a82e0',
+  B: '#e33334',
 };
 
 // Paper palette

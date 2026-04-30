@@ -59,20 +59,25 @@ export class Game {
 
     // Pixels of movement before we commit to drag-rotate (vs tap-to-place)
     const DRAG_THRESHOLD = 8;
-    // Radians of rotation per pixel of horizontal drag
-    // π / 500 ≈ a full 500 px swipe rotates 180°, so ~250 px ≈ 90°
+    // Radians of rotation per pixel of drag.
+    // π / 500 ≈ a full 500 px swipe rotates 180°, so ~250 px ≈ 90°.
+    // Same factor for horizontal (azimuth) and vertical (elevation) drag.
     const DRAG_FACTOR = Math.PI / 500;
 
     // ── Mouse ──────────────────────────────────────────────────────────────
     let mouseDown     = false;
     let mouseStartX   = 0;
+    let mouseStartY   = 0;
     let mousePrevX    = 0;
+    let mousePrevY    = 0;
     let mouseDragging = false;
 
     canvas.addEventListener('mousedown', (e) => {
       mouseDown     = true;
       mouseStartX   = e.clientX;
+      mouseStartY   = e.clientY;
       mousePrevX    = e.clientX;
+      mousePrevY    = e.clientY;
       mouseDragging = false;
     });
 
@@ -82,15 +87,21 @@ export class Game {
         return;
       }
       const dx = e.clientX - mousePrevX;
+      const dy = e.clientY - mousePrevY;
       mousePrevX = e.clientX;
+      mousePrevY = e.clientY;
 
-      if (!mouseDragging && Math.abs(e.clientX - mouseStartX) > DRAG_THRESHOLD) {
+      const totalDrag = Math.hypot(e.clientX - mouseStartX, e.clientY - mouseStartY);
+      if (!mouseDragging && totalDrag > DRAG_THRESHOLD) {
         mouseDragging = true;
         this.inputCtrl.setEnabled(false);
         this.renderer.setHoveredEdge(null);
       }
       if (mouseDragging) {
+        // Horizontal drag → azimuth; vertical drag → elevation.
+        // Negate dy so dragging DOWN tilts the camera down (revealing the top face).
         this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
+        this.cameraCtrl.dragByVertical(-dy * DRAG_FACTOR);
       } else {
         this.inputCtrl.handleMove(e.clientX, e.clientY);
       }
@@ -122,6 +133,7 @@ export class Game {
     let touchStartX   = 0;
     let touchStartY   = 0;
     let touchPrevX    = 0;
+    let touchPrevY    = 0;
     let touchDragging = false;
     let touchPinching = false;
     let pinchPrevDist = 0;
@@ -137,7 +149,7 @@ export class Game {
       if (e.touches.length === 1) {
         const t      = e.touches[0];
         touchStartX  = touchPrevX = t.clientX;
-        touchStartY  = t.clientY;
+        touchStartY  = touchPrevY = t.clientY;
         touchDragging = false;
         touchPinching = false;
       } else if (e.touches.length === 2) {
@@ -162,7 +174,9 @@ export class Game {
       if (!touchPinching && e.touches.length === 1) {
         const t   = e.touches[0];
         const dx  = t.clientX - touchPrevX;
+        const dy  = t.clientY - touchPrevY;
         touchPrevX = t.clientX;
+        touchPrevY = t.clientY;
 
         const totalDrag = Math.hypot(
           t.clientX - touchStartX,
@@ -174,7 +188,10 @@ export class Game {
           this.renderer.setHoveredEdge(null);
         }
         if (touchDragging) {
+          // Horizontal drag → azimuth; vertical drag → elevation.
+          // Negate dy so dragging DOWN tilts the camera down (revealing the top face).
           this.cameraCtrl.dragBy(dx * DRAG_FACTOR);
+          this.cameraCtrl.dragByVertical(-dy * DRAG_FACTOR);
         } else {
           this.inputCtrl.handleMove(t.clientX, t.clientY);
         }

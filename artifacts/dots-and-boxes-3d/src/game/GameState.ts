@@ -193,10 +193,10 @@ export class GameState {
       this.emit({ type: 'turnChanged', player: this.currentPlayer });
     }
 
-    // Disable undo after player switch (per PRD: undo before next move)
-    if (!completedAnyCube) {
-      this.canUndo = false;
-    }
+    // Undo stays enabled until the next move is placed (which will replace
+    // the snapshot above with a fresh one) or until undo() is invoked.
+    // This lets a player take back their last move before committing the
+    // next one, regardless of whether the move completed a cube.
 
     return true;
   }

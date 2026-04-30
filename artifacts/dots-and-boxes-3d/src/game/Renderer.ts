@@ -6,20 +6,24 @@ import type { EdgeState, FaceState, CubeState } from './types';
 // Palette
 // ---------------------------------------------------------------------------
 const PLAYER_COLORS: Record<string, number> = {
-  A: 0x3575c8, // vivid mid-blue, moderate saturation
-  B: 0xc8393a, // vivid mid-red, moderate saturation
+  A: 0x2a82e0, // peppy saturated blue
+  B: 0xe33334, // peppy saturated red
 };
 
 const BG_COLOR      = 0xf5f0e8; // warm off-white paper
-const NEUTRAL_COLOR = 0xb8aa98; // warm gray — used for corner dots
-// Neutral edge color: faded further toward the paper BG so the wires
-// between nodes read as ghostly guides rather than solid lines.
-const NEUTRAL_EDGE_COLOR = 0xded6ca;
+const NEUTRAL_COLOR = 0xa8987f; // warm gray — used for corner dots (slightly darker for crisper read)
+// Neutral edge color: a muted warm gray that reads clearly as grid
+// structure but stays subordinate to played edges. Combined with a lit
+// matte material + scene fog, front-facing edges pick up subtle key-light
+// brightness while back-facing edges fade toward the paper background —
+// giving strong depth separation without changing thickness.
+const NEUTRAL_EDGE_COLOR = 0xb8a890;
 
-// Completed cube cage: player hue lightened ~40% toward white
+// Completed cube cage: player hue lightened ~40% toward white so the cage
+// reads as "owned but settled" without competing with active play moves.
 const COMPLETED_COLOR: Record<string, number> = {
-  A: 0x7aaad4,
-  B: 0xd48c8e,
+  A: 0x80b4ec,
+  B: 0xee8586,
 };
 
 // Hover: bright amber, always reads as "interactive"
@@ -28,7 +32,7 @@ const HOVER_COLOR = 0xe8a030;
 // ---------------------------------------------------------------------------
 // Geometry radii — four tiers: ghost / cage / mark / interactive
 // ---------------------------------------------------------------------------
-const RADIUS_NEUTRAL   = 0.011; // ghost structure — recedes completely
+const RADIUS_NEUTRAL   = 0.014; // grid guide — readable but subordinate to played
 const RADIUS_COMPLETED = 0.019; // cage wire on a completed cube — visible but calm
 const RADIUS_OWNED     = 0.026; // player mark — reads clearly above neutral
 const RADIUS_HOVER     = 0.038; // hover state — unmistakably interactive
@@ -206,6 +210,9 @@ export class Renderer {
   private matHighlightB: THREE.MeshStandardMaterial;
   private matPoint:      THREE.MeshStandardMaterial;
 
+  // Camera-relative rim/back light (position updated every frame)
+  private rimLight!: THREE.DirectionalLight;
+
   // Interaction state
   private hoveredEdgeKey:    string | null = null;
   private lastPlacedEdgeKey: string | null = null;
@@ -228,8 +235,11 @@ export class Renderer {
   constructor(canvas: HTMLCanvasElement) {
     this.scene      = new THREE.Scene();
     this.scene.background = new THREE.Color(BG_COLOR);
-    // Very subtle linear fog — gives a gentle depth gradient to far board elements
-    this.scene.fog  = new THREE.Fog(BG_COLOR, 9, 26);
+    // Tightened linear fog — fades back-of-cube elements toward the paper
+    // background so depth is read as brightness/clarity rather than thickness.
+    // At default zoom (~7 units): front of cube ≈ 5u from camera (no fog),
+    // back of cube ≈ 8.5u (≈45% fog mix toward BG).
+    this.scene.fog  = new THREE.Fog(BG_COLOR, 6, 11.5);
 
     const w = canvas.clientWidth  || canvas.width  || 800;
     const h = canvas.clientHeight || canvas.height || 600;
@@ -253,8 +263,18 @@ export class Renderer {
     this.geoPoint         = new THREE.SphereGeometry(RADIUS_POINT,     8, 8);
 
     // Materials
+    // Neutral (unplayed) edges use a lit, very matte material with mild
+    // transparency. Front-facing edges pick up the warm key light and read
+    // crisply; back-facing edges receive only hemisphere light AND get
+    // dimmed by scene fog (see fog setup) — together producing strong
+    // depth separation without changing thickness.
     this.matNeutral = new THREE.MeshStandardMaterial({
-      color: NEUTRAL_EDGE_COLOR, roughness: 0.88, metalness: 0,
+      color:       NEUTRAL_EDGE_COLOR,
+      roughness:   0.95,
+      metalness:   0,
+      transparent: true,
+      opacity:     0.85,
+      depthWrite:  false,
     });
     this.matHover = new THREE.MeshStandardMaterial({
       color:             HOVER_COLOR,
@@ -290,16 +310,18 @@ export class Renderer {
       emissive:          new THREE.Color(PLAYER_COLORS.B),
       emissiveIntensity: 0.35,
     });
-    // Traveling draw-in highlight — bright, high-emissive, small sphere
+    // Traveling draw-in highlight — bright, high-emissive, small sphere.
+    // Light tint of the player hue so the spark reads as "their color" but
+    // bright enough to pop against the rest of the board.
     this.matHighlightA = new THREE.MeshStandardMaterial({
-      color:             0xaaccff,
+      color:             0xb8d8ff,
       roughness:         0.15,
       metalness:         0,
       emissive:          new THREE.Color(PLAYER_COLORS.A),
       emissiveIntensity: 1.1,
     });
     this.matHighlightB = new THREE.MeshStandardMaterial({
-      color:             0xffaaaa,
+      color:             0xffb8b8,
       roughness:         0.15,
       metalness:         0,
       emissive:          new THREE.Color(PLAYER_COLORS.B),
@@ -315,23 +337,46 @@ export class Renderer {
 
   // ---------------------------------------------------------------------------
   private setupLighting() {
-    // Warm ambient — fills shadows without killing form
-    this.scene.add(new THREE.AmbientLight(0xfff8f0, 0.68));
+    // Hemisphere — warm sky / cool-warm ground baseline. Replaces the previous
+    // ambient + bounce pair: hemisphere illumination is naturally direction-
+    // aware (sky color from above, ground color from below) so the scene reads
+    // well even when the camera rotates to view the cube from below.
+    this.scene.add(new THREE.HemisphereLight(0xfff5e0, 0xe8d8c0, 0.55));
 
-    // Primary: upper-left warm key light
-    const key = new THREE.DirectionalLight(0xfff8ec, 0.65);
-    key.position.set(4, 9, 5);
+    // Primary key — warm directional from upper-front. Defines main form
+    // and gives front-facing surfaces visibly higher brightness than back.
+    const key = new THREE.DirectionalLight(0xfff8ec, 0.55);
+    key.position.set(5, 8, 4);
     this.scene.add(key);
 
-    // Secondary: soft fill from the opposite side, slightly cooler
-    const fill = new THREE.DirectionalLight(0xdde8ff, 0.22);
-    fill.position.set(-5, 2, -4);
+    // Cool fill from the opposite side — soft counter that prevents shadows
+    // from going completely flat without competing with the key.
+    const fill = new THREE.DirectionalLight(0xdde8ff, 0.18);
+    fill.position.set(-4, 3, -3);
     this.scene.add(fill);
 
-    // Bottom bounce — simulates paper-on-table ambient bounce
-    const bounce = new THREE.DirectionalLight(0xfff0d8, 0.10);
-    bounce.position.set(0, -4, 0);
-    this.scene.add(bounce);
+    // Camera-relative rim light — its position is updated every frame in
+    // tick() to sit opposite the camera, so it always silhouettes the back
+    // of the structure and helps separate edges from the paper background.
+    this.rimLight = new THREE.DirectionalLight(0xeaf2ff, 0.30);
+    this.rimLight.position.set(-5, 3, -5);
+    this.scene.add(this.rimLight);
+    this.scene.add(this.rimLight.target); // required so position changes take effect
+  }
+
+  // ---------------------------------------------------------------------------
+  // Move the rim light to the world position opposite the camera (mirrored
+  // through the cube center, with a small upward bias). Called every frame
+  // so the rim always catches the back-facing silhouette as the camera
+  // orbits around the cube.
+  // ---------------------------------------------------------------------------
+  private static readonly RIM_TARGET = new THREE.Vector3(1, 1, 1);
+  private updateRimLight() {
+    const target = Renderer.RIM_TARGET;
+    const dir    = this.camera.position.clone().sub(target).normalize();
+    this.rimLight.position.copy(target).addScaledVector(dir, -7);
+    this.rimLight.position.y += 1.5;
+    this.rimLight.target.position.copy(target);
   }
 
   setupCamera() {
@@ -681,6 +726,7 @@ export class Renderer {
   tick(now: number) {
     this.tickEdgeAnims(now);
     this.tickCubeAnims(now);
+    this.updateRimLight();
     this.renderer.render(this.scene, this.camera);
   }
 

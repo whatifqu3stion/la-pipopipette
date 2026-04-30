@@ -20,8 +20,16 @@ const ZOOM_DEFAULT_FALLBACK = 7;
 const ZOOM_MIN_FALLBACK     = 4.5;
 const ZOOM_MAX_FALLBACK     = 13;
 
-// 45° elevation: true 3/4 view — interior structure clearly visible
-const CAMERA_ELEVATION = Math.PI / 4;
+// Default elevation: 45° — true 3/4 view, interior structure clearly visible.
+const ELEVATION_DEFAULT = Math.PI / 4;
+// Vertical clamp: stop short of straight-up / straight-down to avoid the
+// camera-up singularity at the poles. ±75° gives a wide range that includes
+// looking down at the top face and up at the bottom face.
+const ELEVATION_MIN     = -(75 * Math.PI) / 180;
+const ELEVATION_MAX     =  (75 * Math.PI) / 180;
+// Snap step for elevation on drag-release — finer than the 90° azimuth snap
+// so users can rest at intermediate top/bottom angles.
+const ELEVATION_STEP    = (15 * Math.PI) / 180;
 
 const ROTATION_DURATION = 300; // ms — main sweep
 const SETTLE_DURATION   = 100; // ms — settle after overshoot
@@ -31,10 +39,15 @@ const OVERSHOOT_MAX_DEG = 3;   // degrees — max overshoot for button rotation
 const DIAGONAL_START = Math.PI / 4;
 const STEP           = Math.PI / 2;
 
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 export class CameraController {
   private camera: THREE.PerspectiveCamera;
 
-  private currentAngle = DIAGONAL_START;
+  private currentAngle     = DIAGONAL_START;
+  private currentElevation = ELEVATION_DEFAULT;
 
   // Dynamic zoom range — recomputed by setViewport() based on aspect ratio.
   private zoomDist     = ZOOM_DEFAULT_FALLBACK;
@@ -52,6 +65,8 @@ export class CameraController {
   private animStartTime    = 0;
   private animStartAngle   = 0;
   private animTargetAngle  = 0;
+  private animStartElev    = ELEVATION_DEFAULT;
+  private animTargetElev   = ELEVATION_DEFAULT;
   private animOvershootRad = 0; // set per animation; proportional for snaps, max for buttons
 
   private onAnimationComplete: (() => void) | null = null;
@@ -65,8 +80,8 @@ export class CameraController {
   // Internal position update
   // ---------------------------------------------------------------------------
   private updateCameraPosition() {
-    const r = this.zoomDist;
-    const el = CAMERA_ELEVATION;
+    const r  = this.zoomDist;
+    const el = this.currentElevation;
     this.camera.position.set(
       TARGET.x + r * Math.cos(el) * Math.sin(this.currentAngle),
       TARGET.y + r * Math.sin(el),
@@ -76,7 +91,9 @@ export class CameraController {
   }
 
   // ---------------------------------------------------------------------------
-  // Button rotation — full 90° step with max overshoot
+  // Button rotation — full 90° azimuth step with max overshoot.
+  // Elevation is held fixed so the view doesn't drift vertically when the
+  // user only asked to rotate horizontally.
   // ---------------------------------------------------------------------------
   rotate(direction: 'left' | 'right'): boolean {
     if (this.isAnimating) return false;
@@ -84,6 +101,8 @@ export class CameraController {
     const delta = direction === 'left' ? -STEP : STEP;
     this.animStartAngle   = this.currentAngle;
     this.animTargetAngle  = this.currentAngle + delta;
+    this.animStartElev    = this.currentElevation;
+    this.animTargetElev   = this.currentElevation;
     this.animOvershootRad = (OVERSHOOT_MAX_DEG * Math.PI) / 180;
     this.animStartTime    = performance.now();
     this.isAnimating      = true;
@@ -91,7 +110,8 @@ export class CameraController {
   }
 
   // ---------------------------------------------------------------------------
-  // Drag navigation — called continuously during a pointer drag gesture
+  // Drag navigation — called continuously during a pointer drag gesture.
+  // dragBy = horizontal (azimuth), dragByVertical = vertical (elevation).
   // ---------------------------------------------------------------------------
   dragBy(deltaAngle: number) {
     if (this.isAnimating) return; // button rotation has priority
@@ -99,21 +119,41 @@ export class CameraController {
     this.updateCameraPosition();
   }
 
+  dragByVertical(deltaAngle: number) {
+    if (this.isAnimating) return; // button rotation has priority
+    this.currentElevation = clamp(
+      this.currentElevation + deltaAngle,
+      ELEVATION_MIN,
+      ELEVATION_MAX,
+    );
+    this.updateCameraPosition();
+  }
+
   // ---------------------------------------------------------------------------
-  // Snap — call on drag release; animates to nearest canonical preset
+  // Snap — call on drag release; animates to nearest canonical preset on
+  // both azimuth (90° steps) and elevation (15° steps, clamped).
   // ---------------------------------------------------------------------------
   snapToNearest() {
     if (this.isAnimating) return; // button rotation has priority
 
-    // Round to nearest multiple of STEP, offset by DIAGONAL_START
-    const snapped = Math.round((this.currentAngle - DIAGONAL_START) / STEP) * STEP + DIAGONAL_START;
-    const dist    = Math.abs(snapped - this.currentAngle);
+    const snappedAz = Math.round((this.currentAngle - DIAGONAL_START) / STEP) * STEP + DIAGONAL_START;
+    const snappedEl = clamp(
+      Math.round(this.currentElevation / ELEVATION_STEP) * ELEVATION_STEP,
+      ELEVATION_MIN,
+      ELEVATION_MAX,
+    );
+
+    const distAz = Math.abs(snappedAz - this.currentAngle);
+    const distEl = Math.abs(snappedEl - this.currentElevation);
+    const dist   = Math.max(distAz, distEl);
 
     // Proportional overshoot — capped at OVERSHOOT_MAX_DEG.
     // For a tiny drift (< 5°), overshoot is nearly zero.
     this.animOvershootRad = Math.min((OVERSHOOT_MAX_DEG * Math.PI) / 180, dist * 0.18);
     this.animStartAngle   = this.currentAngle;
-    this.animTargetAngle  = snapped;
+    this.animTargetAngle  = snappedAz;
+    this.animStartElev    = this.currentElevation;
+    this.animTargetElev   = snappedEl;
     this.animStartTime    = performance.now();
     this.isAnimating      = true;
   }
@@ -179,19 +219,20 @@ export class CameraController {
   update(now: number): boolean {
     if (!this.isAnimating) return false;
 
-    const elapsed      = now - this.animStartTime;
+    const elapsed       = now - this.animStartTime;
     const totalDuration = ROTATION_DURATION + SETTLE_DURATION;
 
     if (elapsed >= totalDuration) {
-      this.currentAngle = this.animTargetAngle;
-      this.isAnimating  = false;
+      this.currentAngle     = this.animTargetAngle;
+      this.currentElevation = this.animTargetElev;
+      this.isAnimating      = false;
       this.updateCameraPosition();
       this.onAnimationComplete?.();
       this.onAnimationComplete = null;
       return false;
     }
 
-    const dir = this.animTargetAngle >= this.animStartAngle ? 1 : -1;
+    const dirAz = this.animTargetAngle >= this.animStartAngle ? 1 : -1;
 
     if (elapsed < ROTATION_DURATION) {
       // easeInOut sweep with overshoot applied as a sine bump
@@ -200,12 +241,18 @@ export class CameraController {
       this.currentAngle =
         this.animStartAngle +
         (this.animTargetAngle - this.animStartAngle) * eased +
-        dir * this.animOvershootRad * Math.sin(eased * Math.PI);
+        dirAz * this.animOvershootRad * Math.sin(eased * Math.PI);
+      // Elevation eases in lockstep (no overshoot — vertical bounce feels off).
+      this.currentElevation =
+        this.animStartElev +
+        (this.animTargetElev - this.animStartElev) * eased;
     } else {
-      // Settle: ease back from overshoot position to exact target
+      // Settle: ease azimuth back from overshoot to exact target; elevation
+      // already finished (no overshoot) so just lock it.
       const st    = (elapsed - ROTATION_DURATION) / SETTLE_DURATION;
       const eased = 1 - (1 - st) * (1 - st);
-      this.currentAngle = this.animTargetAngle + dir * this.animOvershootRad * (1 - eased);
+      this.currentAngle = this.animTargetAngle + dirAz * this.animOvershootRad * (1 - eased);
+      this.currentElevation = this.animTargetElev;
     }
 
     this.updateCameraPosition();
@@ -224,10 +271,11 @@ export class CameraController {
   }
 
   reset() {
-    this.currentAngle    = DIAGONAL_START;
-    this.zoomDist        = this.zoomDefault;
-    this.hasUserZoomed   = false;
-    this.isAnimating     = false;
+    this.currentAngle     = DIAGONAL_START;
+    this.currentElevation = ELEVATION_DEFAULT;
+    this.zoomDist         = this.zoomDefault;
+    this.hasUserZoomed    = false;
+    this.isAnimating      = false;
     this.updateCameraPosition();
   }
 }
