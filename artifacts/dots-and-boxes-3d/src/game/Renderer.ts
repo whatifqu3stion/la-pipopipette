@@ -869,8 +869,8 @@ export class Renderer {
         uColor:    { value: new THREE.Color(0x3a2d1f) }, // warm dark, matches old
         uOpacity:  { value: SHADOW_FLOOR_OPACITY },      // tick() fades this
         uCenter:   { value: new THREE.Vector2(1, 1) },   // structure XZ center
-        uPlateau:  { value: 1.55 },                      // full-strength radius
-        uFalloff:  { value: 3.30 },                      // outer fade radius
+        uPlateau:  { value: 1.24 },                      // full-strength radius
+        uFalloff:  { value: 2.64 },                      // outer fade radius
       },
       vertexShader: /* glsl */ `
         varying vec3 vWorldPos;
