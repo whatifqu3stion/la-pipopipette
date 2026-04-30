@@ -348,16 +348,23 @@ function makeCubeMat(): THREE.ShaderMaterial {
 // ---------------------------------------------------------------------------
 // Internal data structures
 // ---------------------------------------------------------------------------
+// Edge-tier geometry policy:
+// • NEUTRAL (unplayed grid) and HOVER (interactive preview) use a single
+//   shared straight CylinderGeometry — the grid reads as a clean,
+//   structured guide. Hover stays clean too: it's the "this slot exists"
+//   preview, not yet an inked stroke.
+// • OWNED and COMPLETED use per-edge wavy TubeGeometry (built in
+//   createEdgeMesh) — once a player commits a stroke, it becomes a
+//   hand-drawn ink line.
 interface EdgeSketchData {
   startPos:    THREE.Vector3;
   endPos:      THREE.Vector3;
   midPos:      THREE.Vector3;
   dirVec:      THREE.Vector3; // unit vector along edge (length = 1 world unit)
   curve:       THREE.CatmullRomCurve3; // sketch path in mesh-local space
-  geoNeutral:  THREE.TubeGeometry;
+  // Per-edge wavy ink strokes (only used by OWNED/COMPLETED tiers)
   geoCompleted: THREE.TubeGeometry;
   geoOwned:    THREE.TubeGeometry;
-  geoHover:    THREE.TubeGeometry;
 }
 
 interface EdgeAnimState {
@@ -387,6 +394,11 @@ export class Renderer {
   // Per-dot ink geometries (deterministic, irregular).  Tracked so dispose()
   // can free GPU buffers — there is no shared geoPoint anymore.
   private dotGeometries: THREE.SphereGeometry[] = [];
+  // Shared straight-cylinder geometries for the unplayed grid (NEUTRAL) and
+  // the interactive preview (HOVER). Single instance per tier, reused by
+  // every edge mesh — orientation is handled by per-edge mesh rotation.
+  private geoStraightNeutral: THREE.CylinderGeometry;
+  private geoStraightHover:   THREE.CylinderGeometry;
 
   // Materials
   private matNeutral:    THREE.MeshStandardMaterial;
@@ -470,10 +482,22 @@ export class Renderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 
-    // Shared geometry: only the traveling spark (sphere) is shared. Corner
-    // dots are per-instance ink geometries built lazily in initPoints, and
-    // edge stroke geometries are per-edge on EdgeSketchData.
+    // Shared geometries:
+    // • The traveling draw-in spark (sphere) is shared.
+    // • Straight cylinders for the NEUTRAL grid and HOVER preview tiers —
+    //   identical for every edge (all length 1 along local-Y), so a single
+    //   instance per radius tier is reused across all 54 edges. The mesh's
+    //   per-edge rotation/position handles orientation.
+    // • OWNED and COMPLETED tiers stay per-edge wavy TubeGeometry on
+    //   EdgeSketchData so each played stroke has its own hand-drawn shape.
+    // • Corner dots remain per-instance ink geometries (initPoints).
     this.geoHighlight = new THREE.SphereGeometry(RADIUS_HIGHLIGHT, 8, 8);
+    this.geoStraightNeutral = new THREE.CylinderGeometry(
+      RADIUS_NEUTRAL, RADIUS_NEUTRAL, 1, 8, 1, true,
+    );
+    this.geoStraightHover = new THREE.CylinderGeometry(
+      RADIUS_HOVER, RADIUS_HOVER, 1, 8, 1, true,
+    );
 
     // Materials
     // Neutral (unplayed) edges use a lit, very matte material with mild
@@ -746,18 +770,22 @@ export class Renderer {
     const midPos = startPos.clone().addScaledVector(dirVec, 0.5);
     const endPos = startPos.clone().addScaledVector(dirVec, 1);
 
-    // Build the per-edge sketch curve and four tier geometries.
-    // The curve lives in mesh-local space (Y from -0.5 to +0.5).
+    // Per-edge wavy sketch curve — used by the OWNED/COMPLETED tiers and
+    // by the spark animation that rides the stroke during draw-in. The
+    // curve lives in mesh-local space (Y from -0.5 to +0.5) so the
+    // existing per-edge mesh.rotation orients it correctly across x/y/z.
     const curve = makeSketchCurve(key);
     const sketch: EdgeSketchData = {
       startPos, endPos, midPos, dirVec, curve,
-      geoNeutral:   new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_NEUTRAL,   SKETCH_RADIAL, false),
       geoCompleted: new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_COMPLETED, SKETCH_RADIAL, false),
       geoOwned:     new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_OWNED,     SKETCH_RADIAL, false),
-      geoHover:     new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_HOVER,     SKETCH_RADIAL, false),
     };
 
-    const mesh = new THREE.Mesh(sketch.geoNeutral, this.matNeutral);
+    // Initial geometry is the shared straight neutral cylinder — every
+    // unplayed edge reads as a clean grid line. updateEdgeStates swaps in
+    // the per-edge wavy tube only when the edge becomes OWNED/COMPLETED,
+    // and swaps in the shared straight hover cylinder on hover preview.
+    const mesh = new THREE.Mesh(this.geoStraightNeutral, this.matNeutral);
     mesh.position.copy(midPos);
     // Orient the mesh so local +Y aligns with +dirVec for ALL three axes.
     // This guarantees the curve's local-Y start (-0.5) maps to the edge's
@@ -834,23 +862,23 @@ export class Renderer {
       if (this.edgeAnims.has(key)) continue;
 
       if (key === this.hoveredEdgeKey && !owner) {
-        // ① Hover — interactive signal
-        mesh.geometry = sketch.geoHover;
+        // ① Hover — interactive signal (clean preview, not yet inked)
+        mesh.geometry = this.geoStraightHover;
         mesh.material = this.matHover;
 
       } else if (key === this.lastPlacedEdgeKey && owner) {
-        // ② Post-placement glow (timer running)
+        // ② Post-placement glow (timer running) — wavy ink stroke
         mesh.geometry = sketch.geoOwned;
         mesh.material = owner === 'A' ? this.matGlowA : this.matGlowB;
 
       } else if (completedCubeEdgeOwner.has(key)) {
-        // ③ Cage wire of a completed cube — lighter, calmer
+        // ③ Cage wire of a completed cube — wavy ink stroke, lighter hue
         const cubeOwner = completedCubeEdgeOwner.get(key)!;
         mesh.geometry = sketch.geoCompleted;
         mesh.material = cubeOwner === 'A' ? this.matCompA : this.matCompB;
 
       } else if (owner === 'A') {
-        // ④ Owned mid-game — full player mark
+        // ④ Owned mid-game — wavy ink stroke
         mesh.geometry = sketch.geoOwned;
         mesh.material = this.matPlayerA;
 
@@ -859,8 +887,8 @@ export class Renderer {
         mesh.material = this.matPlayerB;
 
       } else {
-        // ⑤ Neutral / unplayed — ghost structure
-        mesh.geometry = sketch.geoNeutral;
+        // ⑤ Neutral / unplayed — clean straight grid line
+        mesh.geometry = this.geoStraightNeutral;
         mesh.material = this.matNeutral;
       }
 
@@ -1130,13 +1158,13 @@ export class Renderer {
     this.edgeAnims.clear();
     // Per-edge sketch geometries (4 tubes per edge)
     for (const sketch of this.edgeSketches.values()) {
-      sketch.geoNeutral.dispose();
       sketch.geoCompleted.dispose();
       sketch.geoOwned.dispose();
-      sketch.geoHover.dispose();
     }
     this.edgeSketches.clear();
     this.geoHighlight.dispose();
+    this.geoStraightNeutral.dispose();
+    this.geoStraightHover.dispose();
     for (const geo of this.dotGeometries) geo.dispose();
     this.dotGeometries.length = 0;
     this.shadowFloor.geometry.dispose();
