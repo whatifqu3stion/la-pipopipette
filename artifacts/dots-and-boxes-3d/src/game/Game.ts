@@ -1,5 +1,5 @@
 import { GameState } from './GameState';
-import { Renderer } from './Renderer';
+import { Renderer, EDGE_ANIM_MS } from './Renderer';
 import { CameraController } from './CameraController';
 import { InputController } from './InputController';
 import { buildPoints, edgeKey, getCubeEdges } from './GameModel';
@@ -48,6 +48,16 @@ export class Game {
   }
 
   private syncRendererWithState() {
+    this.syncRendererEdges();
+    this.renderer.updateFaceStates(this.state.getFaceStates());
+    this.renderer.updateCubeStates(this.state.getCubeStates());
+  }
+
+  // Edge-only slice of syncRendererWithState — used on placement so the
+  // edge state (incl. valid-edge set and completed-cube cage hue) updates
+  // immediately while the face/cube fill animations are deferred until
+  // after the placed edge's draw-in stroke completes.
+  private syncRendererEdges() {
     const validEdgeKeys = new Set(this.state.getValidEdges().map(e => edgeKey(e)));
 
     // Build a map of edgeKey → cube-owner for every edge that belongs to a
@@ -63,8 +73,6 @@ export class Game {
     }
 
     this.renderer.updateEdgeStates(this.state.getEdgeStates(), validEdgeKeys, completedCubeEdgeOwner);
-    this.renderer.updateFaceStates(this.state.getFaceStates());
-    this.renderer.updateCubeStates(this.state.getCubeStates());
   }
 
   private bindInput() {
@@ -241,8 +249,24 @@ export class Game {
 
     // ── Game logic callbacks ───────────────────────────────────────────────
     this.inputCtrl.onPlace((placedKey, placedOwner) => {
-      this.syncRendererWithState();
+      // Edge state updates immediately so the placed edge's resting state
+      // (and any cage-hue changes on completed cubes' edges) is in place
+      // when the draw-in animation finishes. The placed edge itself is
+      // owned by beginEdgePlaceAnim during the next EDGE_ANIM_MS, so
+      // updateEdgeStates skips it and applies only to the others.
+      this.syncRendererEdges();
       this.renderer.beginEdgePlaceAnim(placedKey, placedOwner);
+
+      // Defer face & cube fill animations until after the placed edge's
+      // draw-in stroke completes — so the player sees the line finish
+      // first, then the panel inks in. We snapshot state lazily inside
+      // the timeout so any further state changes (additional placements,
+      // undo) during the delay are reflected when the deferred call fires.
+      setTimeout(() => {
+        this.renderer.updateFaceStates(this.state.getFaceStates());
+        this.renderer.updateCubeStates(this.state.getCubeStates());
+      }, EDGE_ANIM_MS);
+
       // Clone-and-play so rapid placements overlap cleanly. Cloned nodes
       // are GC'd once playback ends. Errors (autoplay policy, decode
       // failure) are non-fatal and silently swallowed.
