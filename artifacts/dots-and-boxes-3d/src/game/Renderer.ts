@@ -10,8 +10,8 @@ import type { EdgeState, FaceState, CubeState } from './types';
 // Palette
 // ---------------------------------------------------------------------------
 const PLAYER_COLORS: Record<string, number> = {
-  A: 0x2a82e0, // peppy saturated blue
-  B: 0xe33334, // peppy saturated red
+  A: 0x1a8cff, // vibrant electric blue
+  B: 0xff3b40, // vibrant fire-engine red
 };
 
 const BG_COLOR      = 0xf5f0e8; // warm off-white paper
@@ -26,8 +26,8 @@ const NEUTRAL_EDGE_COLOR = 0xb8a890;
 // Completed cube cage: player hue lightened ~40% toward white so the cage
 // reads as "owned but settled" without competing with active play moves.
 const COMPLETED_COLOR: Record<string, number> = {
-  A: 0x80b4ec,
-  B: 0xee8586,
+  A: 0x76baff,
+  B: 0xff8a8c,
 };
 
 // Hover: bright amber, always reads as "interactive"
