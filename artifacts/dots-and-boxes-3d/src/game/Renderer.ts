@@ -829,10 +829,16 @@ export class Renderer {
     // Bokeh — focus is set per-frame in tick() so it follows the cube.
     // Aperture controls how strong the blur grows with distance from focus;
     // maxblur clamps the total blur radius (in normalized screen units).
+    //   • aperture = 0.0055 — the cube spans ~3 world units front-to-back,
+    //     which now produces a visibly soft back face even at close zoom
+    //     instead of the previous near-imperceptible 3-4px smear.
+    //   • maxblur  = 0.006  — half the previous cap; this is what limits
+    //     the halo bleed where the cube silhouette meets the paper, so
+    //     the effect reads as depth-of-field rather than a drop shadow.
     this.bokehPass = new BokehPass(this.scene, this.camera, {
       focus:    7,        // overwritten per-frame
-      aperture: 0.0018,   // moderate — soft, lens-like
-      maxblur:  0.012,    // visible but not destructive to readability
+      aperture: 0.0055,
+      maxblur:  0.006,
     });
     // BokehPass shader takes aspect from a uniform; keep it in sync on resize.
     (this.bokehPass.uniforms as Record<string, THREE.IUniform>).aspect.value = w / h;
@@ -1484,10 +1490,13 @@ export class Renderer {
     fog.near = Math.max(0.5, camDist - 1.5);
     fog.far  = camDist + 3.5;
 
-    // Bokeh focal plane sits slightly forward of the cube center so the front
-    // edges read razor-sharp and the back edges get the most blur.
+    // Bokeh focal plane sits right at the cube's *front face* (cube extends
+    // ±1 unit from its center in each axis) so the closest face reads razor-
+    // sharp and the back of the cube collects all the blur. Pulling the plane
+    // back from the previous camDist-0.6 offset means front-face details
+    // (edges and dots) snap into focus instead of sitting in a soft zone.
     (this.bokehPass.uniforms as Record<string, THREE.IUniform>).focus.value =
-      Math.max(0.1, camDist - 0.6);
+      Math.max(0.1, camDist - 1.0);
 
     // Fade the shadow-catcher floor out gracefully as the camera tilts
     // toward / below the floor's level so it never appears as a visible
