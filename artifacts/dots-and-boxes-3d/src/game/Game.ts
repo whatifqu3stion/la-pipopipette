@@ -113,7 +113,8 @@ export class Game {
       mouseDown = false;
       if (mouseDragging) {
         mouseDragging = false;
-        this.cameraCtrl.snapToNearest();
+        // No snap on release — the cube rests at whatever angle the user
+        // settled on so they can reach edges between snap points.
         this.inputCtrl.setEnabled(true);
       } else {
         this.inputCtrl.handleClick(e.clientX, e.clientY);
@@ -122,7 +123,6 @@ export class Game {
 
     canvas.addEventListener('mouseleave', () => {
       if (mouseDragging) {
-        this.cameraCtrl.snapToNearest();
         this.inputCtrl.setEnabled(true);
       }
       mouseDown     = false;
@@ -207,7 +207,7 @@ export class Game {
       }
       if (touchDragging) {
         touchDragging = false;
-        this.cameraCtrl.snapToNearest();
+        // No snap on release — see mouseup handler above.
         this.inputCtrl.setEnabled(true);
       } else {
         // Short tap — place edge
@@ -218,7 +218,6 @@ export class Game {
 
     canvas.addEventListener('touchcancel', () => {
       if (touchDragging) {
-        this.cameraCtrl.snapToNearest();
         this.inputCtrl.setEnabled(true);
       }
       touchDragging = false;
