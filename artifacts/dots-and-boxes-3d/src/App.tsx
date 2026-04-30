@@ -386,7 +386,7 @@ export default function App() {
           backgroundSize:     'cover',
           backgroundPosition: 'center center',
           backgroundRepeat:   'no-repeat',
-          opacity:            0.20,
+          opacity:            0.12,
           mixBlendMode:       'multiply' as React.CSSProperties['mixBlendMode'],
         }}
       />
