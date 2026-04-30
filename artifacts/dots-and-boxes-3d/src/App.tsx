@@ -257,11 +257,11 @@ export default function App() {
     return () => { game.dispose(); gameRef.current = null; };
   }, [syncUI]);
 
-  // The board background plate (paper texture + corner vignette) is applied
+  // The board background plate (a flat cream base color) is applied
   // directly to the root container's inline style below — see
   // BOARD_BG_LAYERS at the top of this file. The WebGL canvas mounts above
-  // it with a transparent clear color so this stack reads through as the
-  // actual board surface.
+  // it with a transparent clear color, and the crumpled-paper photo
+  // overlay is rendered above the canvas to supply visible paper detail.
 
   const handleRotateLeft  = () => gameRef.current?.rotateCamera('left');
   const handleRotateRight = () => gameRef.current?.rotateCamera('right');
@@ -328,12 +328,12 @@ export default function App() {
   // Root is position:fixed / inset:0 — avoids the iOS 100vh bug where the
   // browser toolbar eats into the viewport.
   //
-  // BOARD_BG_LAYERS provides a paper-with-vignette plate that's mostly
-  // hidden behind the WebGL canvas (which renders an opaque cream background
-  // — see Renderer.ts for why: BokehPass post-processing forces alpha=1.0).
-  // The plate still shows briefly during canvas init, and is the visible
-  // surface in the WebGL-fail fallback. The paper grain SVG and vignette
-  // overlay below sit ON TOP of the canvas to layer texture on the cube.
+  // BOARD_BG_LAYERS provides a flat cream base that's mostly hidden behind
+  // the WebGL canvas (which renders an opaque cream background — see
+  // Renderer.ts for why: BokehPass post-processing forces alpha=1.0). The
+  // plate still shows briefly during canvas init, and is the visible
+  // surface in the WebGL-fail fallback. The crumpled-paper overlay below
+  // sits ON TOP of the canvas to layer crease detail across everything.
   // -------------------------------------------------------------------------
   return (
     <div style={{
