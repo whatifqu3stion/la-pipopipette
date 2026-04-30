@@ -622,11 +622,11 @@ export class Renderer {
     // Clear color is irrelevant since scene.background is set to an opaque
     // cream — but kept defensively in case background is ever cleared.
     this.renderer.setClearColor(BG_COLOR, 1);
-    // Soft shadow map — used only by the accent light to drop a faint
-    // smudge onto the implied floor below the cube. Cube content does not
-    // self-shadow (out of scope); only the floor receives.
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+    // No shadow-mapping pass — the floor "shadow" is a custom radial blob
+    // (see setupLighting) that's rotationally symmetric in world space so it
+    // never appears to spin as the camera orbits the cube. Also saves the
+    // shadow render pass per frame.
+    this.renderer.shadowMap.enabled = false;
 
     // Shared geometries:
     // • The traveling draw-in spark (sphere) is shared.
@@ -811,46 +811,69 @@ export class Renderer {
     this.scene.add(this.rimLight);
     this.scene.add(this.rimLight.target); // required so position changes take effect
 
-    // Accent light + shadow caster.
-    // Sole purpose is twofold: (a) add a small extra dimensional cue on top
-    // of the existing key/fill, and (b) cast a soft drop shadow onto the
-    // implied floor below the cube.  Intensity is intentionally low so the
-    // surface lighting on the cube only changes by a hair.
+    // Accent light — adds a small extra dimensional cue on top of the
+    // existing key/fill. No shadow casting (the floor blob below is a
+    // separate world-space radial decal, not a projected silhouette).
     const accent = new THREE.DirectionalLight(0xfff5e0, 0.12);
     accent.position.set(2.5, 14, 2.5);
     accent.target.position.set(1, 0, 1); // aim at cube footprint center
-    accent.castShadow = true;
-    // Tight orthographic frustum that just contains the cube footprint plus
-    // a margin for the floor plane around it.  Keeping the frustum tight
-    // gives the most shadow-map resolution per texel.
-    const sc = accent.shadow.camera as THREE.OrthographicCamera;
-    sc.left   = -5; sc.right = 5;
-    sc.top    =  5; sc.bottom = -5;
-    sc.near   =  4; sc.far    = 28;
-    sc.updateProjectionMatrix();
-    accent.shadow.mapSize.set(1024, 1024);
-    accent.shadow.radius      = 6;       // PCF blur radius — soft smudge edges
-    accent.shadow.bias        = -0.0005; // avoid acne on thin geometry
-    accent.shadow.normalBias  = 0.02;    // avoid Peter Panning on dot/edge contacts
     this.scene.add(accent);
     this.scene.add(accent.target);
 
-    // Shadow-catcher floor — invisible plane below the cube.  Only the
-    // shadow is rendered (ShadowMaterial), so the plane itself never
-    // appears as a visible surface.  Sits 1.5 units below the cube's
-    // bottom face — well outside the gameplay reading area.
-    this.shadowFloorMat = new THREE.ShadowMaterial({
-      color:   0x3a2d1f,            // warm dark — sits naturally on warm paper bg
-      opacity: SHADOW_FLOOR_OPACITY, // tick() fades from this baseline
-    });
-    this.shadowFloorMat.transparent = true;
+    // Floor "shadow" — a soft radial blob anchored under the cube center
+    // in world space. Rendered with a custom shader instead of the previous
+    // ShadowMaterial + cast-shadow setup. The previous approach projected
+    // the cube's silhouette (a square) straight down, so as the camera
+    // orbited, the shadow's square edges visibly rotated. A radial blob is
+    // rotationally symmetric, so the same view angle in any direction gives
+    // an identical shadow read — the shadow stays put under the cube and
+    // only "reacts" if the cube itself moves or scales.
+    //
+    // Falloff is computed in world XZ from the cube footprint center (1,1):
+    //   • full strength inside `uPlateau` (covers the structure footprint)
+    //   • smooth fade out to `uFalloff`
+    //   • discarded beyond, so no transparent fill cost on far pixels.
+    this.shadowFloorMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor:    { value: new THREE.Color(0x3a2d1f) }, // warm dark, matches old
+        uOpacity:  { value: SHADOW_FLOOR_OPACITY },      // tick() fades this
+        uCenter:   { value: new THREE.Vector2(1, 1) },   // structure XZ center
+        uPlateau:  { value: 1.55 },                      // full-strength radius
+        uFalloff:  { value: 3.30 },                      // outer fade radius
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        void main() {
+          vec4 wp   = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform vec3  uColor;
+        uniform float uOpacity;
+        uniform vec2  uCenter;
+        uniform float uPlateau;
+        uniform float uFalloff;
+        varying vec3  vWorldPos;
+        void main() {
+          float dist = length(vec2(vWorldPos.x, vWorldPos.z) - uCenter);
+          float blob = 1.0 - smoothstep(uPlateau, uFalloff, dist);
+          // Slight power curve softens the inner edge of the falloff
+          blob = pow(blob, 1.4);
+          if (blob < 0.001) discard;
+          gl_FragColor = vec4(uColor, blob * uOpacity);
+        }
+      `,
+      transparent: true,
+      depthWrite:  false,
+    }) as unknown as THREE.ShadowMaterial; // typed as ShadowMaterial for field compat
     this.shadowFloor = new THREE.Mesh(
-      new THREE.PlaneGeometry(20, 20),
+      new THREE.PlaneGeometry(8, 8),
       this.shadowFloorMat,
     );
     this.shadowFloor.rotation.x = -Math.PI / 2;
     this.shadowFloor.position.set(1, -1.5, 1);
-    this.shadowFloor.receiveShadow = true;
     // Render before the transparent face/cube fills (renderOrder 1/2) so the
     // sort order is unambiguous when the camera is roughly horizontal.
     this.shadowFloor.renderOrder = -1;
@@ -1351,9 +1374,12 @@ export class Renderer {
     // smudge from low angles. Fade window is anchored to the floor's y
     // (-1.5): full opacity when the camera sits at or above cube center
     // (y >= 1.5), zero by the time the camera reaches the floor level.
+    // Note: shadowFloorMat is a ShaderMaterial under the hood; we drive its
+    // uOpacity uniform directly because the shader doesn't read material.opacity.
     const camY  = this.camera.position.y;
     const fade  = Math.max(0, Math.min(1, (camY + 1.5) / 3.0));
-    this.shadowFloorMat.opacity = SHADOW_FLOOR_OPACITY * fade;
+    const uniforms = (this.shadowFloorMat as unknown as THREE.ShaderMaterial).uniforms;
+    uniforms.uOpacity.value = SHADOW_FLOOR_OPACITY * fade;
 
     this.composer.render();
   }
