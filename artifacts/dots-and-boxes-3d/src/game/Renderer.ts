@@ -964,8 +964,9 @@ export class Renderer {
    *
    * Sketch implementation: the mesh stays put at midPos; we swap to the
    * owned tube and reveal it progressively along its curve via drawRange.
-   * The traveling spark rides the actual wavy curve in world space, so it
-   * truly hugs the leading tip instead of a straight reference line.
+   * The traveling spark slides on a straight start→end lerp — wobble
+   * amplitude is sub-pixel at default zoom, so visually identical to
+   * hugging the curve, and avoids a three.js getPoint failure mode.
    */
   beginEdgePlaceAnim(key: string, owner: 'A' | 'B') {
     const mesh   = this.edgeMeshes.get(key);
@@ -1028,10 +1029,6 @@ export class Renderer {
   // ---------------------------------------------------------------------------
   // Animation ticks (called every frame from tick())
   // ---------------------------------------------------------------------------
-  // Reusable scratch — avoids per-frame allocations when computing the
-  // spark's world position from the edge's local sketch curve.
-  private static readonly TICK_LOCAL_PT = new THREE.Vector3();
-
   private tickEdgeAnims(now: number) {
     for (const [key, anim] of this.edgeAnims) {
       const mesh = this.edgeMeshes.get(key);
@@ -1047,12 +1044,14 @@ export class Renderer {
       const ringsRevealed = Math.max(0, Math.floor(SKETCH_TUBULAR * p));
       anim.sketch.geoOwned.drawRange.count = ringsRevealed * SKETCH_RADIAL * 6;
 
-      // Highlight spark rides the actual wavy curve (not a straight line).
-      // The curve is in mesh-local space, so transform it into world space
-      // via mesh.matrixWorld (kept fresh below).
-      mesh.updateMatrixWorld();
-      const localPt = anim.sketch.curve.getPoint(p, Renderer.TICK_LOCAL_PT);
-      anim.highlight.position.copy(localPt).applyMatrix4(mesh.matrixWorld);
+      // Highlight spark slides straight from start dot to end dot. The
+      // wavy stroke's wobble amplitude is sub-pixel at default zoom, so a
+      // straight lerp is visually indistinguishable from following the
+      // curve — and it sidesteps a three.js CatmullRom getPoint failure
+      // mode that previously crashed on every click.
+      anim.highlight.position
+        .copy(anim.sketch.startPos)
+        .lerp(anim.sketch.endPos, p);
 
       if (raw >= 1) {
         // Animation complete — restore full draw range
