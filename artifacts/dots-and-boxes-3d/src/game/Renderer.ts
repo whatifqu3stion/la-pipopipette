@@ -75,6 +75,69 @@ function easeOutBack(t: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Sketch stroke geometry
+//
+// Each board edge is rendered as a TubeGeometry along a CatmullRomCurve3 with
+// small, deterministic perpendicular jitter at intermediate control points —
+// giving every line a slightly wavy, hand-drawn feel instead of a perfect
+// machine-clean cylinder.
+//
+// • The curve lives in the mesh's local space: length 1 along the local Y
+//   axis (from y=-0.5 to y=+0.5), with x/z offsets at the inner control
+//   points. Endpoints are pinned to (0, ±0.5, 0) so strokes still meet
+//   cleanly at corner dots.
+// • Wobble is seeded from the edge key so the same edge always draws the
+//   same shape — no per-frame shimmer, stable across reloads.
+// • One curve per edge, four TubeGeometries per edge (one per tier radius).
+//   The four tiers share the same wavy path so swapping geometry only
+//   changes thickness, never silhouette.
+// ---------------------------------------------------------------------------
+const SKETCH_TUBULAR = 14;    // segments along the stroke — enough to read the wobble
+const SKETCH_RADIAL  = 6;     // sides around the tube — slightly faceted, ink-like
+const WOBBLE_AMP     = 0.013; // perpendicular jitter at midpoints (world units)
+
+function hashEdgeKey(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function makeSketchCurve(key: string): THREE.CatmullRomCurve3 {
+  const rng = mulberry32(hashEdgeKey(key));
+  const N   = 6;
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i < N; i++) {
+    const t = i / (N - 1);
+    const y = -0.5 + t;
+    if (i === 0 || i === N - 1) {
+      // Pin endpoints so strokes meet cleanly at the corner dots
+      pts.push(new THREE.Vector3(0, y, 0));
+    } else {
+      const a = (rng() * 2 - 1) * WOBBLE_AMP;
+      const b = (rng() * 2 - 1) * WOBBLE_AMP;
+      pts.push(new THREE.Vector3(a, y, b));
+    }
+  }
+  return new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
+}
+
+// Total index count of a non-closed TubeGeometry: tubular * radial * 6
+const SKETCH_INDEX_COUNT = SKETCH_TUBULAR * SKETCH_RADIAL * 6;
+
+// ---------------------------------------------------------------------------
 // ShaderMaterials for face fills and cube volumes
 // ---------------------------------------------------------------------------
 const FACE_VERT = /* glsl */`
@@ -172,16 +235,22 @@ function makeCubeMat(): THREE.ShaderMaterial {
 // ---------------------------------------------------------------------------
 // Internal data structures
 // ---------------------------------------------------------------------------
-interface EdgePosData {
-  startPos:   THREE.Vector3;
-  dirVec:     THREE.Vector3; // unit vector along edge (length = 1 world unit)
-  fullMidPos: THREE.Vector3;
+interface EdgeSketchData {
+  startPos:    THREE.Vector3;
+  endPos:      THREE.Vector3;
+  midPos:      THREE.Vector3;
+  dirVec:      THREE.Vector3; // unit vector along edge (length = 1 world unit)
+  curve:       THREE.CatmullRomCurve3; // sketch path in mesh-local space
+  geoNeutral:  THREE.TubeGeometry;
+  geoCompleted: THREE.TubeGeometry;
+  geoOwned:    THREE.TubeGeometry;
+  geoHover:    THREE.TubeGeometry;
 }
 
 interface EdgeAnimState {
   owner:     'A' | 'B';
   startTime: number;
-  pos:       EdgePosData;
+  sketch:    EdgeSketchData;
   highlight: THREE.Mesh;    // traveling spark — removed from scene on completion
 }
 
@@ -198,13 +267,11 @@ export class Renderer {
   private faceMeshes    = new Map<string, THREE.Mesh>();
   private cubeMeshes    = new Map<string, THREE.Mesh>();
 
-  // Geometry tiers (shared — never cloned per-mesh, only swapped on material)
-  private geoNeutralEdge:   THREE.CylinderGeometry;
-  private geoCompletedEdge: THREE.CylinderGeometry;
-  private geoOwnedEdge:     THREE.CylinderGeometry;
-  private geoHoverEdge:     THREE.CylinderGeometry;
-  private geoHighlight:     THREE.SphereGeometry;
-  private geoPoint:         THREE.SphereGeometry;
+  // Per-edge sketch geometries are owned by EdgeSketchData (one curve, four
+  // tube tiers per edge, all seeded deterministically from the edge key).
+  // Only the dot/highlight geometries are shared.
+  private geoHighlight: THREE.SphereGeometry;
+  private geoPoint:     THREE.SphereGeometry;
 
   // Materials
   private matNeutral:    THREE.MeshStandardMaterial;
@@ -241,8 +308,9 @@ export class Renderer {
   private lastPlacedEdgeKey: string | null = null;
   private lastPlacedTimer    = 0;
 
-  // Edge position data (set at initEdges time, static thereafter)
-  private edgePosData = new Map<string, EdgePosData>();
+  // Per-edge sketch data (curve + tube geometries for all four tiers).
+  // Built at initEdges time, static thereafter.
+  private edgeSketches = new Map<string, EdgeSketchData>();
 
   // Edge draw-in animations — keyed by edgeKey
   private edgeAnims = new Map<string, EdgeAnimState>();
@@ -287,13 +355,10 @@ export class Renderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 
-    // Geometries
-    this.geoNeutralEdge   = new THREE.CylinderGeometry(RADIUS_NEUTRAL,   RADIUS_NEUTRAL,   1, 6);
-    this.geoCompletedEdge = new THREE.CylinderGeometry(RADIUS_COMPLETED, RADIUS_COMPLETED, 1, 6);
-    this.geoOwnedEdge     = new THREE.CylinderGeometry(RADIUS_OWNED,     RADIUS_OWNED,     1, 8);
-    this.geoHoverEdge     = new THREE.CylinderGeometry(RADIUS_HOVER,     RADIUS_HOVER,     1, 8);
-    this.geoHighlight     = new THREE.SphereGeometry(RADIUS_HIGHLIGHT, 8, 8);
-    this.geoPoint         = new THREE.SphereGeometry(RADIUS_POINT,     8, 8);
+    // Shared geometries (corner dots + traveling spark). Edge stroke
+    // geometries are per-edge and live on EdgeSketchData.
+    this.geoHighlight = new THREE.SphereGeometry(RADIUS_HIGHLIGHT, 8, 8);
+    this.geoPoint     = new THREE.SphereGeometry(RADIUS_POINT,     8, 8);
 
     // Materials
     // Neutral (unplayed) edges use a lit, very matte material with mild
@@ -528,21 +593,24 @@ export class Renderer {
   initEdges(edges: EdgeState[]) {
     for (const { edge } of edges) {
       const key = edgeKey(edge);
-      const { mesh, hitMesh, posData } = this.createEdgeMesh(edge);
+      const { mesh, hitMesh, sketch } = this.createEdgeMesh(edge, key);
       mesh.userData    = { edgeKey: key };
       hitMesh.userData = { edgeKey: key };
       this.edgeMeshes.set(key, mesh);
       this.edgeHitMeshes.set(key, hitMesh);
-      this.edgePosData.set(key, posData);
+      this.edgeSketches.set(key, sketch);
       this.scene.add(mesh);
       this.scene.add(hitMesh);
     }
   }
 
-  private createEdgeMesh(edge: import('./types').Edge): {
-    mesh: THREE.Mesh;
+  private createEdgeMesh(
+    edge: import('./types').Edge,
+    key:  string,
+  ): {
+    mesh:    THREE.Mesh;
     hitMesh: THREE.Mesh;
-    posData: EdgePosData;
+    sketch:  EdgeSketchData;
   } {
     const { start, direction } = edge;
 
@@ -552,22 +620,40 @@ export class Renderer {
       direction === 'y' ? 1 : 0,
       direction === 'z' ? 1 : 0,
     );
-    const fullMidPos = startPos.clone().addScaledVector(dirVec, 0.5);
+    const midPos = startPos.clone().addScaledVector(dirVec, 0.5);
+    const endPos = startPos.clone().addScaledVector(dirVec, 1);
 
-    const mesh = new THREE.Mesh(this.geoNeutralEdge, this.matNeutral);
-    mesh.position.copy(fullMidPos);
-    if (direction === 'x') mesh.rotation.z = Math.PI / 2;
-    else if (direction === 'z') mesh.rotation.x = Math.PI / 2;
+    // Build the per-edge sketch curve and four tier geometries.
+    // The curve lives in mesh-local space (Y from -0.5 to +0.5).
+    const curve = makeSketchCurve(key);
+    const sketch: EdgeSketchData = {
+      startPos, endPos, midPos, dirVec, curve,
+      geoNeutral:   new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_NEUTRAL,   SKETCH_RADIAL, false),
+      geoCompleted: new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_COMPLETED, SKETCH_RADIAL, false),
+      geoOwned:     new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_OWNED,     SKETCH_RADIAL, false),
+      geoHover:     new THREE.TubeGeometry(curve, SKETCH_TUBULAR, RADIUS_HOVER,     SKETCH_RADIAL, false),
+    };
+
+    const mesh = new THREE.Mesh(sketch.geoNeutral, this.matNeutral);
+    mesh.position.copy(midPos);
+    // Orient the mesh so local +Y aligns with +dirVec for ALL three axes.
+    // This guarantees the curve's local-Y start (-0.5) maps to the edge's
+    // worldspace startPos, so the draw-in animation always grows from
+    // start → end consistently across x/y/z edges.
+    if (direction === 'x')      mesh.rotation.z = -Math.PI / 2;
+    else if (direction === 'z') mesh.rotation.x =  Math.PI / 2;
+    mesh.updateMatrixWorld();
     // Cast onto the implied floor — no self-shadowing on the cube itself.
     mesh.castShadow = true;
 
+    // Hit cylinder: kept generous and unchanged for raycasting precision.
     const hitGeo  = new THREE.CylinderGeometry(0.18, 0.18, 1, 6);
     const hitMesh = new THREE.Mesh(hitGeo, new THREE.MeshBasicMaterial({ visible: false }));
-    hitMesh.position.copy(fullMidPos);
-    if (direction === 'x') hitMesh.rotation.z = Math.PI / 2;
+    hitMesh.position.copy(midPos);
+    if (direction === 'x')      hitMesh.rotation.z = Math.PI / 2;
     else if (direction === 'z') hitMesh.rotation.x = Math.PI / 2;
 
-    return { mesh, hitMesh, posData: { startPos, dirVec, fullMidPos } };
+    return { mesh, hitMesh, sketch };
   }
 
   initFaces(faces: FaceState[]) {
@@ -616,46 +702,49 @@ export class Renderer {
     this.validEdgeKeys = validEdgeKeys;
 
     for (const { edge, owner } of edges) {
-      const key  = edgeKey(edge);
-      const mesh = this.edgeMeshes.get(key);
-      if (!mesh) continue;
+      const key    = edgeKey(edge);
+      const mesh   = this.edgeMeshes.get(key);
+      const sketch = this.edgeSketches.get(key);
+      if (!mesh || !sketch) continue;
 
       // Skip edges currently in a draw-in animation — tick() owns them
       if (this.edgeAnims.has(key)) continue;
 
       if (key === this.hoveredEdgeKey && !owner) {
         // ① Hover — interactive signal
-        mesh.geometry = this.geoHoverEdge;
+        mesh.geometry = sketch.geoHover;
         mesh.material = this.matHover;
 
       } else if (key === this.lastPlacedEdgeKey && owner) {
         // ② Post-placement glow (timer running)
-        mesh.geometry = this.geoOwnedEdge;
+        mesh.geometry = sketch.geoOwned;
         mesh.material = owner === 'A' ? this.matGlowA : this.matGlowB;
 
       } else if (completedCubeEdgeOwner.has(key)) {
         // ③ Cage wire of a completed cube — lighter, calmer
         const cubeOwner = completedCubeEdgeOwner.get(key)!;
-        mesh.geometry = this.geoCompletedEdge;
+        mesh.geometry = sketch.geoCompleted;
         mesh.material = cubeOwner === 'A' ? this.matCompA : this.matCompB;
 
       } else if (owner === 'A') {
         // ④ Owned mid-game — full player mark
-        mesh.geometry = this.geoOwnedEdge;
+        mesh.geometry = sketch.geoOwned;
         mesh.material = this.matPlayerA;
 
       } else if (owner === 'B') {
-        mesh.geometry = this.geoOwnedEdge;
+        mesh.geometry = sketch.geoOwned;
         mesh.material = this.matPlayerB;
 
       } else {
         // ⑤ Neutral / unplayed — ghost structure
-        mesh.geometry = this.geoNeutralEdge;
+        mesh.geometry = sketch.geoNeutral;
         mesh.material = this.matNeutral;
       }
 
-      // Ensure scale is restored (may have been modified during a prior animation)
-      mesh.scale.y = 1;
+      // Ensure full stroke is drawn (drawRange may have been clamped during
+      // a prior in-flight draw-in animation on this geometry).
+      mesh.geometry.drawRange.start = 0;
+      mesh.geometry.drawRange.count = Infinity;
     }
   }
 
@@ -721,51 +810,53 @@ export class Renderer {
    * Begin the draw-in animation for a freshly placed edge.
    * Replaces the old setLastPlacedEdge — the glow phase starts automatically
    * once the 160 ms draw-in animation completes.
+   *
+   * Sketch implementation: the mesh stays put at midPos; we swap to the
+   * owned tube and reveal it progressively along its curve via drawRange.
+   * The traveling spark rides the actual wavy curve in world space, so it
+   * truly hugs the leading tip instead of a straight reference line.
    */
   beginEdgePlaceAnim(key: string, owner: 'A' | 'B') {
-    const mesh    = this.edgeMeshes.get(key);
-    const posData = this.edgePosData.get(key);
-    if (!mesh || !posData) return;
+    const mesh   = this.edgeMeshes.get(key);
+    const sketch = this.edgeSketches.get(key);
+    if (!mesh || !sketch) return;
 
     // Cancel any previous animation on this key
     const prev = this.edgeAnims.get(key);
     if (prev) {
       this.scene.remove(prev.highlight);
+      // Restore drawRange on whatever geometry the previous anim was using
+      prev.sketch.geoOwned.drawRange.count = Infinity;
       this.edgeAnims.delete(key);
     }
 
-    // Apply draw material immediately
-    mesh.geometry = this.geoOwnedEdge;
+    // Apply draw material immediately and clamp drawRange to the very start
+    mesh.geometry = sketch.geoOwned;
     mesh.material = owner === 'A' ? this.matGlowA : this.matGlowB;
+    sketch.geoOwned.drawRange.start = 0;
+    sketch.geoOwned.drawRange.count = 0;
 
-    // Start at the edge's begin point with near-zero length
-    mesh.position.copy(posData.startPos);
-    mesh.scale.y = 0.001;
-
-    // Traveling highlight spark
+    // Traveling highlight spark — starts at the curve's begin point
     const highlight = new THREE.Mesh(
       this.geoHighlight,
       owner === 'A' ? this.matHighlightA : this.matHighlightB,
     );
-    highlight.position.copy(posData.startPos);
+    highlight.position.copy(sketch.startPos);
     this.scene.add(highlight);
 
     this.edgeAnims.set(key, {
-      owner, startTime: performance.now(), pos: posData, highlight,
+      owner, startTime: performance.now(), sketch, highlight,
     });
   }
 
   /** Call on undo or reset — cancels active animations and clears glow state. */
   clearLastPlaced() {
-    // Cancel all in-flight edge animations and reset their meshes
-    for (const [key, anim] of this.edgeAnims) {
+    // Cancel all in-flight edge animations and restore their owned-tier
+    // drawRange so any future render of that geometry shows the full stroke.
+    for (const [, anim] of this.edgeAnims) {
       this.scene.remove(anim.highlight);
-      const mesh = this.edgeMeshes.get(key);
-      if (mesh) {
-        mesh.scale.y = 1;
-        const pos = this.edgePosData.get(key);
-        if (pos) mesh.position.copy(pos.fullMidPos);
-      }
+      anim.sketch.geoOwned.drawRange.start = 0;
+      anim.sketch.geoOwned.drawRange.count = Infinity;
     }
     this.edgeAnims.clear();
 
@@ -786,6 +877,10 @@ export class Renderer {
   // ---------------------------------------------------------------------------
   // Animation ticks (called every frame from tick())
   // ---------------------------------------------------------------------------
+  // Reusable scratch — avoids per-frame allocations when computing the
+  // spark's world position from the edge's local sketch curve.
+  private static readonly TICK_LOCAL_PT = new THREE.Vector3();
+
   private tickEdgeAnims(now: number) {
     for (const [key, anim] of this.edgeAnims) {
       const mesh = this.edgeMeshes.get(key);
@@ -794,21 +889,23 @@ export class Renderer {
       const raw = Math.min((now - anim.startTime) / EDGE_ANIM_MS, 1);
       const p   = easeOutCubic(raw);
 
-      // Grow the cylinder from startPos toward fullMidPos
-      mesh.position
-        .copy(anim.pos.startPos)
-        .addScaledVector(anim.pos.dirVec, 0.5 * p);
-      mesh.scale.y = Math.max(0.001, p);
+      // Reveal the leading portion of the tube along its curve. drawRange
+      // operates on indices, and TubeGeometry emits SKETCH_RADIAL * 6 indices
+      // per tubular ring — so revealing N rings means N * SKETCH_RADIAL * 6
+      // indices, walking the stroke smoothly from start to end.
+      const ringsRevealed = Math.max(0, Math.floor(SKETCH_TUBULAR * p));
+      anim.sketch.geoOwned.drawRange.count = ringsRevealed * SKETCH_RADIAL * 6;
 
-      // Highlight spark rides the leading edge
-      anim.highlight.position
-        .copy(anim.pos.startPos)
-        .addScaledVector(anim.pos.dirVec, p);
+      // Highlight spark rides the actual wavy curve (not a straight line).
+      // The curve is in mesh-local space, so transform it into world space
+      // via mesh.matrixWorld (kept fresh below).
+      mesh.updateMatrixWorld();
+      const localPt = anim.sketch.curve.getPoint(p, Renderer.TICK_LOCAL_PT);
+      anim.highlight.position.copy(localPt).applyMatrix4(mesh.matrixWorld);
 
       if (raw >= 1) {
-        // Animation complete — settle into resting state
-        mesh.position.copy(anim.pos.fullMidPos);
-        mesh.scale.y = 1;
+        // Animation complete — restore full draw range
+        anim.sketch.geoOwned.drawRange.count = Infinity;
 
         this.scene.remove(anim.highlight);
         this.edgeAnims.delete(key);
@@ -908,10 +1005,14 @@ export class Renderer {
     window.clearTimeout(this.lastPlacedTimer);
     for (const anim of this.edgeAnims.values()) this.scene.remove(anim.highlight);
     this.edgeAnims.clear();
-    this.geoNeutralEdge.dispose();
-    this.geoCompletedEdge.dispose();
-    this.geoOwnedEdge.dispose();
-    this.geoHoverEdge.dispose();
+    // Per-edge sketch geometries (4 tubes per edge)
+    for (const sketch of this.edgeSketches.values()) {
+      sketch.geoNeutral.dispose();
+      sketch.geoCompleted.dispose();
+      sketch.geoOwned.dispose();
+      sketch.geoHover.dispose();
+    }
+    this.edgeSketches.clear();
     this.geoHighlight.dispose();
     this.geoPoint.dispose();
     this.shadowFloor.geometry.dispose();
