@@ -46,7 +46,7 @@ const RADIUS_POINT     = 0.038; // corner dots — anchor the grid
 // ---------------------------------------------------------------------------
 // Animation timings
 // ---------------------------------------------------------------------------
-const EDGE_ANIM_MS = 160;  // edge draw-in duration (ms)
+const EDGE_ANIM_MS = 420;  // edge draw-in duration (ms) — paced like a hand stroke
 const EDGE_GLOW_MS = 350;  // post-draw emphasis duration (ms)
 const CUBE_ANIM_MS = 400;  // cube scale-in duration (ms)
 
@@ -66,6 +66,16 @@ const SHADOW_FLOOR_OPACITY = 0.16;
 // ---------------------------------------------------------------------------
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
+}
+
+// S-curve: gentle acceleration at the start, brief sustained middle,
+// soft deceleration at the end. Matches the speed profile of a hand
+// drawing a deliberate ink stroke — better "human pen" feel than a
+// pure ease-out (which whips at the start then crawls to a halt).
+function easeInOutCubic(t: number): number {
+  return t < 0.5
+    ? 4 * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
 // Slight scale overshoot: scale goes 0 → ~1.07 → 1
@@ -1188,7 +1198,7 @@ export class Renderer {
       if (!mesh) { this.edgeAnims.delete(key); continue; }
 
       const raw = Math.min((now - anim.startTime) / EDGE_ANIM_MS, 1);
-      const p   = easeOutCubic(raw);
+      const p   = easeInOutCubic(raw);
 
       // Reveal the leading portion of the tube along its curve. drawRange
       // operates on indices, and TubeGeometry emits SKETCH_RADIAL * 6 indices
