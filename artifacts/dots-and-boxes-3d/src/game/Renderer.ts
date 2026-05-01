@@ -50,7 +50,16 @@ const RADIUS_POINT     = 0.038; // corner dots — anchor the grid
 export const EDGE_ANIM_MS = 1000; // edge draw-in duration (ms) — paced like a hand stroke
 const EDGE_GLOW_MS = 350;  // post-draw emphasis duration (ms)
 const CUBE_ANIM_MS = 400;  // cube scale-in duration (ms)
-const FACE_FILL_MS = 1000;  // face "marker stroke" fill-in duration (ms)
+const FACE_FILL_MS         = 1000;  // face "marker stroke" fill-in duration (ms)
+// Two-stage face entrance: while the marker stroke is drawing in, the
+// fill is rendered at a fraction of its final opacity so the strokes
+// read as "ghost" lines. Once drawing finishes we hold for a beat,
+// then fade the opacity up to FACE_OPACITY. This makes the completed
+// face feel like it's being inked rather than appearing at full
+// strength immediately.
+const FACE_FILL_OPACITY    = 0.4;  // 0..1 — fraction of FACE_OPACITY during the draw-in
+const FACE_FILL_PAUSE_MS   = 200;  // beat between draw finishing and opacity fade-up
+const FACE_FADE_UP_MS      = 350;  // opacity fade-up duration after the pause
 
 // ---------------------------------------------------------------------------
 // Depth-of-field tuning
@@ -1367,13 +1376,22 @@ export class Renderer {
         (mat.uniforms.uColor.value as THREE.Color).setHex(
           owner === 'A' ? PLAYER_COLORS.A : owner === 'B' ? PLAYER_COLORS.B : 0xaaaaaa
         );
-        mat.uniforms.uOpacity.value = FACE_OPACITY;
 
         if (!this.faceComplete.has(key)) {
           // Newly completed — kick off the marker-stroke fill animation.
+          // Start at the low "ghost" opacity; tickFaceAnims() will hold
+          // it there during the draw-in + pause and then ramp it up to
+          // FACE_OPACITY.
           this.faceComplete.add(key);
           this.faceAnimTimes.set(key, performance.now());
-          mat.uniforms.uFill.value = 0;
+          mat.uniforms.uFill.value    = 0;
+          mat.uniforms.uOpacity.value = FACE_OPACITY * FACE_FILL_OPACITY;
+        } else if (!this.faceAnimTimes.has(key)) {
+          // Already complete and not currently animating — pin to the
+          // steady-state opacity. We deliberately don't write uOpacity
+          // when an animation is in progress, otherwise an unrelated
+          // state-sync call would yank it back to FACE_OPACITY mid-fade.
+          mat.uniforms.uOpacity.value = FACE_OPACITY;
         }
       } else {
         mat.uniforms.uOpacity.value = 0.0;
@@ -1629,18 +1647,54 @@ export class Renderer {
     }
   }
 
-  // Drive each active face's uFill from 0 → 1 over FACE_FILL_MS. Linear
-  // pacing reads as a steady-handed marker stroke; the back-and-forth
-  // serpentine motion itself is encoded in the shader (see FACE_FRAG).
+  // Drive each active face through three sequential phases:
+  //   1. Draw-in   (0 .. FACE_FILL_MS):
+  //        uFill ramps 0→1 (linear — reads as a steady marker stroke,
+  //        the serpentine motion itself is encoded in FACE_FRAG).
+  //        uOpacity is pinned at FACE_OPACITY * FACE_FILL_OPACITY so
+  //        the strokes appear faintly while drawing.
+  //   2. Pause    (.. + FACE_FILL_PAUSE_MS):
+  //        Both uFill and uOpacity hold — a beat between drawing
+  //        finishing and the colour settling in.
+  //   3. Fade-up  (.. + FACE_FADE_UP_MS):
+  //        uOpacity smoothsteps up to its full FACE_OPACITY value.
+  //
+  // The face is removed from faceAnimTimes once phase 3 finishes,
+  // after which updateFaceStates' steady-state branch keeps the
+  // opacity at FACE_OPACITY for any subsequent state syncs.
   private tickFaceAnims(now: number) {
     for (const [key, startTime] of this.faceAnimTimes) {
       const mesh = this.faceMeshes.get(key);
       if (!mesh) { this.faceAnimTimes.delete(key); continue; }
+      const mat     = mesh.material as THREE.ShaderMaterial;
+      const elapsed = now - startTime;
 
-      const t   = Math.min((now - startTime) / FACE_FILL_MS, 1);
-      const mat = mesh.material as THREE.ShaderMaterial;
-      mat.uniforms.uFill.value = t;
-      if (t >= 1) this.faceAnimTimes.delete(key);
+      // Phase 1 — draw-in at low opacity.
+      if (elapsed < FACE_FILL_MS) {
+        mat.uniforms.uFill.value    = elapsed / FACE_FILL_MS;
+        mat.uniforms.uOpacity.value = FACE_OPACITY * FACE_FILL_OPACITY;
+        continue;
+      }
+      // From here on the stroke is fully drawn.
+      mat.uniforms.uFill.value = 1;
+
+      // Phase 2 — beat of pause, opacity still low.
+      const pauseEnd = FACE_FILL_MS + FACE_FILL_PAUSE_MS;
+      if (elapsed < pauseEnd) {
+        mat.uniforms.uOpacity.value = FACE_OPACITY * FACE_FILL_OPACITY;
+        continue;
+      }
+
+      // Phase 3 — smoothstep opacity from low up to full.
+      const fadeT = Math.min((elapsed - pauseEnd) / FACE_FADE_UP_MS, 1);
+      const eased = fadeT * fadeT * (3 - 2 * fadeT);
+      mat.uniforms.uOpacity.value =
+        FACE_OPACITY * (FACE_FILL_OPACITY + (1 - FACE_FILL_OPACITY) * eased);
+
+      if (fadeT >= 1) {
+        mat.uniforms.uOpacity.value = FACE_OPACITY;
+        this.faceAnimTimes.delete(key);
+      }
     }
   }
 
