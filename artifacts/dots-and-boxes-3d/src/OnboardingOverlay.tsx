@@ -4,12 +4,13 @@ import React, { useEffect, useState, useRef } from 'react';
 // Sequence: title → "A bit of history" → "What it is" → "How to play"
 // → onComplete() (which fades the overlay out and lets the cube reveal).
 //
-// Typography: Reenie Beanie (Google Fonts, a loose handwriting face)
-// throughout so the overlay feels like a pencil-and-paper aside rather
-// than a generic app screen. Larger font sizes than a sans-serif would
-// need — handwriting fonts have generous whitespace built into the glyphs.
+// Typography: Reenie Beanie is reserved for the two title lines on the
+// splash screen ("La Pipopipette" / "3D Dots & Boxes") to give them a
+// handwritten, pencil-and-paper character. Everything else — eyebrows,
+// body copy, buttons — uses Inter for clean modern readability.
 
 const FONT          = '"Reenie Beanie", cursive';
+const MODERN_FONT   = 'Inter, system-ui, sans-serif';
 const INK           = '#2c1a0e';
 const INK_MED       = 'rgba(44,26,14,0.62)';
 const INK_DIM       = 'rgba(44,26,14,0.40)';
@@ -193,7 +194,7 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
           padding:        '24px 24px',
           paddingTop:     'calc(env(safe-area-inset-top, 0px) + 24px)',
           paddingBottom:  'calc(env(safe-area-inset-bottom, 0px) + 24px)',
-          fontFamily:     FONT,
+          fontFamily:     MODERN_FONT,
           color:          INK,
           animation:      closing
             ? 'obOverlayOut 460ms ease-in forwards'
@@ -212,8 +213,8 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
               background: 'transparent',
               border:     'none',
               color:      INK_DIM,
-              fontFamily: FONT,
-              fontSize:   18,
+              fontSize:   13,
+              fontWeight: 500,
               cursor:     'pointer',
               padding:    '6px 8px',
             }}
@@ -231,8 +232,9 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
               textAlign: 'center',
             }}
           >
-            {/* Main title */}
+            {/* Main title — Reenie Beanie */}
             <div style={{
+              fontFamily: FONT,
               fontSize:   'clamp(72px, 16vw, 110px)',
               lineHeight: 1.05,
               color:      INK,
@@ -242,8 +244,9 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
               La Pipopipette
             </div>
 
-            {/* Sub-label */}
+            {/* Sub-label — Reenie Beanie */}
             <div style={{
+              fontFamily:    FONT,
               marginTop:     14,
               fontSize:      28,
               color:         INK_DIM,
@@ -263,8 +266,9 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
                 border:       `1px solid rgba(44,26,14,0.18)`,
                 background:   'rgba(44,26,14,0.06)',
                 color:        INK,
-                fontFamily:   FONT,
-                fontSize:     26,
+                fontSize:     15,
+                fontWeight:   500,
+                letterSpacing: '0.03em',
                 cursor:       'pointer',
                 opacity:      0,
                 animation:    'obButtonIn 500ms ease-out 1400ms forwards',
@@ -285,17 +289,20 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
           >
             {/* Eyebrow */}
             <div style={{
-              fontSize:      22,
+              fontSize:      11,
+              fontWeight:    600,
+              letterSpacing: '0.10em',
+              textTransform: 'uppercase',
               color:         INK_DIM,
-              marginBottom:  10,
+              marginBottom:  14,
             }}>
               {SECTIONS[step].eyebrow}
             </div>
 
             {/* Body */}
             <div style={{
-              fontSize:   step === 'how' ? 22 : 26,
-              lineHeight: 1.45,
+              fontSize:   step === 'how' ? 15 : 17,
+              lineHeight: 1.65,
               color:      INK_MED,
             }}>
               {SECTIONS[step].body}
@@ -305,17 +312,18 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
               onClick={goNext}
               className="ob-cta"
               style={{
-                marginTop:    36,
-                padding:      '10px 32px',
-                borderRadius: 12,
-                border:       `1px solid rgba(44,26,14,0.18)`,
-                background:   'rgba(44,26,14,0.06)',
-                color:        INK,
-                fontFamily:   FONT,
-                fontSize:     26,
-                cursor:       'pointer',
-                opacity:      0,
-                animation:    'obButtonIn 420ms ease-out 220ms forwards',
+                marginTop:     36,
+                padding:       '10px 32px',
+                borderRadius:  12,
+                border:        `1px solid rgba(44,26,14,0.18)`,
+                background:    'rgba(44,26,14,0.06)',
+                color:         INK,
+                fontSize:      15,
+                fontWeight:    500,
+                letterSpacing: '0.03em',
+                cursor:        'pointer',
+                opacity:       0,
+                animation:     'obButtonIn 420ms ease-out 220ms forwards',
               }}
             >
               {SECTIONS[step].cta}
