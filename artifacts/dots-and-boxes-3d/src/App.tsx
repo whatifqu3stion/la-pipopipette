@@ -243,6 +243,19 @@ function GameOverBanner({
         >
           Play Again
         </button>
+
+        <div style={{ marginTop: 16, fontSize: 12, color: INK_DIM }}>
+          Made by{' '}
+          <a
+            href="https://x.com/SummitSatoshi"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: INK_MED, textDecoration: 'underline' }}
+          >
+            @SummitSatoshi
+          </a>{' '}
+          on 𝕏
+        </div>
       </div>
     </div>
   );
