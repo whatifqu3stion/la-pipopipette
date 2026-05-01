@@ -52,14 +52,17 @@ const EDGE_GLOW_MS = 350;  // post-draw emphasis duration (ms)
 const CUBE_ANIM_MS = 400;  // cube scale-in duration (ms)
 const FACE_FILL_MS         = 1000;  // face "marker stroke" fill-in duration (ms)
 // Two-stage face entrance: while the marker stroke is drawing in, the
-// fill is rendered at a fraction of its final opacity so the strokes
-// read as "ghost" lines. Once drawing finishes we hold for a beat,
-// then fade the opacity up to FACE_OPACITY. This makes the completed
-// face feel like it's being inked rather than appearing at full
-// strength immediately.
-const FACE_FILL_OPACITY    = 0.75; // 0..1 — fraction of FACE_OPACITY during the draw-in
-const FACE_FILL_PAUSE_MS   = 200;  // beat between draw finishing and opacity fade-up
-const FACE_FADE_UP_MS      = 350;  // opacity fade-up duration after the pause
+// fill is rendered with extra opacity so the strokes are clearly
+// visible (FACE_OPACITY itself is only ~0.07 — too faint to read
+// while drawing). Once drawing finishes we hold for a beat, then
+// settle the opacity DOWN to FACE_OPACITY. This makes the completed
+// face feel like ink drying rather than appearing at full strength
+// immediately. Values > 1 push above FACE_OPACITY during draw-in;
+// values < 1 keep it below. The phase-3 ramp interpolates either
+// direction back to FACE_OPACITY.
+const FACE_FILL_OPACITY    = 2.4;  // multiplier of FACE_OPACITY during the draw-in
+const FACE_FILL_PAUSE_MS   = 200;  // beat between draw finishing and opacity settle
+const FACE_FADE_UP_MS      = 450;  // opacity settle duration after the pause
 
 // ---------------------------------------------------------------------------
 // Depth-of-field tuning
@@ -1651,13 +1654,15 @@ export class Renderer {
   //   1. Draw-in   (0 .. FACE_FILL_MS):
   //        uFill ramps 0→1 (linear — reads as a steady marker stroke,
   //        the serpentine motion itself is encoded in FACE_FRAG).
-  //        uOpacity is pinned at FACE_OPACITY * FACE_FILL_OPACITY (~75% of final) so
-  //        the strokes appear faintly while drawing.
+  //        uOpacity is pinned at FACE_OPACITY * FACE_FILL_OPACITY so the
+  //        strokes are visible (typically > FACE_OPACITY).
   //   2. Pause    (.. + FACE_FILL_PAUSE_MS):
-  //        Both uFill and uOpacity hold — a beat between drawing
-  //        finishing and the colour settling in.
-  //   3. Fade-up  (.. + FACE_FADE_UP_MS):
-  //        uOpacity smoothsteps up to its full FACE_OPACITY value.
+  //        Both uFill and uOpacity hold — a beat between the marker
+  //        finishing and the ink settling.
+  //   3. Settle   (.. + FACE_FADE_UP_MS):
+  //        uOpacity smoothsteps from FACE_OPACITY * FACE_FILL_OPACITY
+  //        back to FACE_OPACITY. Works in either direction (above or
+  //        below) depending on FACE_FILL_OPACITY.
   //
   // The face is removed from faceAnimTimes once phase 3 finishes,
   // after which updateFaceStates' steady-state branch keeps the
