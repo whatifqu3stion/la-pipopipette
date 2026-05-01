@@ -167,7 +167,7 @@ overrides:
   # brace-expansion: v2 (used by minimatch) and v5 both exist; pin only v2 chain.
   "minimatch>brace-expansion": "^2.0.3"
   # Single-major packages — safe to pin globally (no v-next stable release).
-  path-to-regexp: ">=8.4.0"   # DoS via sequential optional groups (GHSA-j3q9, GHSA-27v5)
-  lodash: ">=4.18.0"           # Template code-injection (GHSA-r5fr, GHSA-f23m) — 4.18.1 is latest
-  yaml: ">=2.8.3"              # Stack-overflow via deeply nested YAML (GHSA-48c2)
-  postcss: ">=8.5.10"          # Source-map comment injection (GHSA-qx2v)
+  path-to-regexp: "^8.4.0"    # DoS via sequential optional groups (GHSA-j3q9, GHSA-27v5)
+  lodash: "^4.18.0"            # Template code-injection (GHSA-r5fr, GHSA-f23m) — 4.18.1 is latest
+  yaml: "^2.8.3"               # Stack-overflow via deeply nested YAML (GHSA-48c2)
+  postcss: "^8.5.10"           # Source-map comment injection (GHSA-qx2v)

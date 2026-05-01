@@ -155,10 +155,10 @@ overrides:
   micromatch>picomatch: ^2.3.2
   vite>picomatch: ^4.0.4
   minimatch>brace-expansion: ^2.0.3
-  path-to-regexp: '>=8.4.0'
-  lodash: '>=4.18.0'
-  yaml: '>=2.8.3'
-  postcss: '>=8.5.10'
+  path-to-regexp: ^8.4.0
+  lodash: ^4.18.0
+  yaml: ^2.8.3
+  postcss: ^8.5.10
 
 importers:
 
@@ -2953,7 +2953,7 @@ packages:
       sugarss: ^5.0.0
       terser: ^5.16.0
       tsx: ^4.8.1
-      yaml: '>=2.8.3'
+      yaml: ^2.8.3
     peerDependenciesMeta:
       '@types/node':
         optional: true
