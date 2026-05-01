@@ -539,16 +539,17 @@ export default function App() {
         background:     'linear-gradient(to top, rgba(245,240,232,0.96) 0%, transparent 100%)',
       }}>
 
-        {/* Hint */}
+        {/* Hints */}
         <div style={{
           textAlign:     'center',
           fontSize:      11,
           color:         INK_DIM,
           letterSpacing: '0.04em',
-          lineHeight:    1,
+          lineHeight:    1.7,
           pointerEvents: 'none',
         }}>
-          Tap an edge to place
+          <div>Tap or click an edge to place</div>
+          <div>Drag to rotate &nbsp;·&nbsp; Scroll or pinch to zoom</div>
         </div>
 
         {/* Button row — 4 equal flex buttons */}
