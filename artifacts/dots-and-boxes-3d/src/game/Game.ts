@@ -271,6 +271,35 @@ export class Game {
       this.renderer.setHoveredEdge(null);
     });
 
+    // ── Wheel / trackpad zoom (desktop) ────────────────────────────────────
+    // Mirrors the pinch-zoom path used on touch. We translate wheel
+    // deltaY into a multiplicative zoom factor via an exponential so
+    // every "tick" of the wheel applies the same proportional change
+    // regardless of current zoom level — feels smooth on both a
+    // discrete mouse wheel (large deltas) and a continuous trackpad
+    // (small deltas). preventDefault stops the page from scrolling
+    // when the cursor is over the board. The cameraCtrl.zoom() call
+    // already clamps to the viewport's min/max range so the cube
+    // can't be lost off-screen, and it sets the "user has manually
+    // zoomed" flag so resizes preserve the chosen zoom.
+    const WHEEL_ZOOM_SENSITIVITY = 0.0015; // tuned so one wheel notch ≈ ~10% zoom
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      // Normalise across deltaMode (pixels / lines / pages). Lines
+      // and pages report tiny deltaY numbers; multiply them up so a
+      // single notch on a real mouse wheel feels comparable to a
+      // pixel-mode trackpad swipe of similar physical magnitude.
+      const linesToPx  = 16;
+      const pagesToPx  = 400;
+      const deltaPx =
+        e.deltaMode === 1 ? e.deltaY * linesToPx :
+        e.deltaMode === 2 ? e.deltaY * pagesToPx :
+        e.deltaY;
+      // Negative deltaY (scroll up) → factor > 1 → zoom in.
+      const factor = Math.exp(-deltaPx * WHEEL_ZOOM_SENSITIVITY);
+      this.cameraCtrl.zoom(factor);
+    }, { passive: false });
+
     // ── Game logic callbacks ───────────────────────────────────────────────
     this.inputCtrl.onPlace((placedKey, placedOwner) => {
       // Edge state updates immediately so the placed edge's resting state
