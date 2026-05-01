@@ -28,7 +28,7 @@ function markOnboardingSeen(): void {
 
 // Player colors — matched to the in-game palette in Renderer.ts so the UI
 // dots, score panels, and turn pulse all read as the same hue as the lines.
-const PLAYER_COLORS: Record<string, string> = {
+const PLAYER_COLORS: Record<'A' | 'B', string> = {
   A: '#2a82e0',
   B: '#e33334',
 };

@@ -3,6 +3,7 @@ import { Renderer, EDGE_ANIM_MS } from './Renderer';
 import { CameraController } from './CameraController';
 import { InputController } from './InputController';
 import { buildPoints, edgeKey, faceKey, getCubeEdges } from './GameModel';
+import type { Owner } from './types';
 
 export class Game {
   private state: GameState;
@@ -15,10 +16,10 @@ export class Game {
 
   // Edge-placement sound. A single base HTMLAudioElement is preloaded; each
   // play clones it so rapid placements can overlap without one cutting off
-  // the previous one. Volume is dialed back to ~60% so it sits under, not
-  // over, ambient room noise. Browsers may reject .play() until a user
-  // gesture has occurred, but onPlace only fires after a click/tap so a
-  // gesture is always established by the time we get here.
+  // the previous one. Volume is kept at ~36% so it sits comfortably under
+  // the ambient music without dominating. Browsers may reject .play() until
+  // a user gesture has occurred, but onPlace only fires after a click/tap
+  // so a gesture is always established by the time we get here.
   private placeSound: HTMLAudioElement = (() => {
     const a = new Audio(`${import.meta.env.BASE_URL}sounds/edge-place.mp3`);
     a.preload = 'auto';
@@ -449,7 +450,7 @@ export class Game {
     return this.state.isGameOver();
   }
 
-  getWinner() {
+  getWinner(): Owner {
     return this.state.getWinner();
   }
 
