@@ -252,9 +252,8 @@ function GameOverBanner({
             rel="noopener noreferrer"
             style={{ color: INK_MED, textDecoration: 'underline' }}
           >
-            @SummitSatoshi
-          </a>{' '}
-          on 𝕏
+            @SummitSatoshi 𝕏
+          </a>
         </div>
       </div>
     </div>
