@@ -4,7 +4,6 @@ import type { Owner } from './game/types';
 import { MusicPlayer } from './MusicPlayer';
 import { OnboardingOverlay } from './OnboardingOverlay';
 import paperCrumpleOverlay from '@assets/white-paper-texture_1777522901345.jpg';
-import dogMascot from '@assets/dog-mascot.png';
 
 // First-run onboarding is gated by a localStorage flag. Versioned key
 // so we can re-show the flow after major content updates by bumping
@@ -457,28 +456,6 @@ export default function App() {
       {/* Grain is supplied entirely by the Atmosphere shader pass inside the
           WebGL pipeline (see Renderer.ts), depth-masked to geometry only.
           No DOM overlay or React-side tuning surface is needed here. */}
-
-      {/* ── Dog mascot — bottom-left corner decoration ──
-           Sits at z-index 3 (above the crumple overlay, below all UI at
-           z-index 10+). pointer-events:none so it never captures clicks
-           meant for the canvas beneath. Kept small and semi-transparent
-           so it reads as a watermark rather than a UI element. */}
-      <img
-        src={dogMascot}
-        alt=""
-        aria-hidden="true"
-        style={{
-          position:      'absolute',
-          bottom:        0,
-          left:          0,
-          width:         120,
-          height:        'auto',
-          zIndex:        3,
-          pointerEvents: 'none',
-          opacity:       0.55,
-          userSelect:    'none',
-        }}
-      />
 
       {/* ── TOP BAR ── */}
       <div style={{
