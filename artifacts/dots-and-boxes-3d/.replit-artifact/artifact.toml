@@ -19,7 +19,7 @@ run = "pnpm --filter @workspace/dots-and-boxes-3d run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/dots-and-boxes-3d", "run", "build" ]
-publicDir = "artifacts/dots-and-boxes-3d/dist/public"
+publicDir = "public"
 serve = "static"
 
 [[services.production.rewrites]]

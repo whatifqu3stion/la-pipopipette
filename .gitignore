@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Build output (dots-and-boxes-3d static deployment)
+/public/

@@ -2,7 +2,8 @@ modules = ["nodejs-24", "python-3.11"]
 
 [deployment]
 router = "application"
-deploymentTarget = "autoscale"
+deploymentTarget = "static"
+publicDir = "public"
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]

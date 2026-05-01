@@ -52,7 +52,10 @@ export default defineConfig({
   },
   root: path.resolve(import.meta.dirname),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    // Output to the workspace-root public/ directory — this path is what
+    // the Replit static-deployment system reads (publicDir = "public" in
+    // .replit).  emptyOutDir: true suppresses Vite's outside-root warning.
+    outDir: path.resolve(import.meta.dirname, "../../public"),
     emptyOutDir: true,
   },
   server: {
