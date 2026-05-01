@@ -57,7 +57,7 @@ const FACE_FILL_MS         = 1000;  // face "marker stroke" fill-in duration (ms
 // then fade the opacity up to FACE_OPACITY. This makes the completed
 // face feel like it's being inked rather than appearing at full
 // strength immediately.
-const FACE_FILL_OPACITY    = 0.4;  // 0..1 — fraction of FACE_OPACITY during the draw-in
+const FACE_FILL_OPACITY    = 0.75; // 0..1 — fraction of FACE_OPACITY during the draw-in
 const FACE_FILL_PAUSE_MS   = 200;  // beat between draw finishing and opacity fade-up
 const FACE_FADE_UP_MS      = 350;  // opacity fade-up duration after the pause
 
@@ -1651,7 +1651,7 @@ export class Renderer {
   //   1. Draw-in   (0 .. FACE_FILL_MS):
   //        uFill ramps 0→1 (linear — reads as a steady marker stroke,
   //        the serpentine motion itself is encoded in FACE_FRAG).
-  //        uOpacity is pinned at FACE_OPACITY * FACE_FILL_OPACITY so
+  //        uOpacity is pinned at FACE_OPACITY * FACE_FILL_OPACITY (~75% of final) so
   //        the strokes appear faintly while drawing.
   //   2. Pause    (.. + FACE_FILL_PAUSE_MS):
   //        Both uFill and uOpacity hold — a beat between drawing
