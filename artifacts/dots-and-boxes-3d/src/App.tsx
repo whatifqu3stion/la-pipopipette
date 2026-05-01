@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from './game/Game';
 import type { Owner } from './game/types';
+import { MusicPlayer } from './MusicPlayer';
 import paperCrumpleOverlay from '@assets/white-paper-texture_1777522901345.jpg';
 
 // Player colors — matched to the in-game palette in Renderer.ts so the UI
@@ -465,6 +466,9 @@ export default function App() {
           isActive={!ui.gameOver && ui.currentPlayer === 'B'}
         />
       </div>
+
+      {/* ── Music player (Chillhop Radio live stream) ── */}
+      <MusicPlayer />
 
       {/* ── BOTTOM BAR ── */}
       <div style={{
