@@ -2,7 +2,29 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Game } from './game/Game';
 import type { Owner } from './game/types';
 import { MusicPlayer } from './MusicPlayer';
+import { OnboardingOverlay } from './OnboardingOverlay';
 import paperCrumpleOverlay from '@assets/white-paper-texture_1777522901345.jpg';
+
+// First-run onboarding is gated by a localStorage flag. Versioned key
+// so we can re-show the flow after major content updates by bumping
+// the suffix. Falls back to "show onboarding" if storage is unavailable
+// (private browsing, etc) — that's the safer default for first-time
+// players and harmless for repeat visitors who can just hit Skip.
+const ONBOARDING_KEY = 'dnb3d-onboarding-v1';
+function readOnboardingSeen(): boolean {
+  try {
+    return window.localStorage.getItem(ONBOARDING_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function markOnboardingSeen(): void {
+  try {
+    window.localStorage.setItem(ONBOARDING_KEY, '1');
+  } catch {
+    /* no-op */
+  }
+}
 
 // Player colors — matched to the in-game palette in Renderer.ts so the UI
 // dots, score panels, and turn pulse all read as the same hue as the lines.
@@ -233,6 +255,11 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef   = useRef<Game | null>(null);
   const [webglError, setWebglError] = useState(false);
+  // Onboarding gate. While true, the canvas is NOT mounted and the
+  // Game class is not constructed — keeping the cube hidden until the
+  // intro flow completes. Initialized synchronously from localStorage
+  // so the overlay never flashes for repeat visitors.
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => !readOnboardingSeen());
   const [ui, setUI] = useState<UIState>({
     currentPlayer: 'A',
     scores:        { A: 0, B: 0 },
@@ -254,6 +281,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Defer Game construction until onboarding is dismissed. While
+    // showOnboarding is true the <canvas> element isn't mounted, so
+    // canvasRef.current is null anyway — but checking the flag here
+    // makes the intent explicit and avoids a no-op effect run.
+    if (showOnboarding) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     let game: Game;
@@ -268,7 +300,7 @@ export default function App() {
     game.setStateChangeCallback(syncUI);
     syncUI();
     return () => { game.dispose(); gameRef.current = null; };
-  }, [syncUI]);
+  }, [syncUI, showOnboarding]);
 
   // The board background plate (a flat cream base color) is applied
   // directly to the root container's inline style below — see
@@ -357,11 +389,30 @@ export default function App() {
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     }}>
 
-      {/* ── Canvas (fills entire root) ── */}
-      <canvas
-        ref={canvasRef}
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}
-      />
+      {/* ── Canvas (fills entire root) ──
+           Mounted only after onboarding is dismissed. The `cubeReveal`
+           keyframe gives the cube a brief fade + scale-up entrance
+           when it first appears, instead of popping in instantly. */}
+      {!showOnboarding && (
+        <canvas
+          ref={canvasRef}
+          style={{
+            position:        'absolute',
+            inset:           0,
+            width:           '100%',
+            height:          '100%',
+            display:         'block',
+            transformOrigin: 'center center',
+            animation:       'cubeReveal 900ms cubic-bezier(.2,.7,.2,1) both',
+          }}
+        />
+      )}
+
+      {/* Game UI (everything except music) is hidden during onboarding so
+          the player only sees the intro flow on first visit. Music stays
+          mounted across the transition so the audio that started during
+          onboarding keeps playing into the game. */}
+      {!showOnboarding && <>
 
       {/* ── Crumpled-paper overlay ──
            A photo of crumpled paper layered over the entire board (canvas)
@@ -521,10 +572,27 @@ export default function App() {
         <GameOverBanner winner={ui.winner} scores={ui.scores} onReset={handleReset} />
       )}
 
+      </>}
+
+      {/* ── First-run onboarding overlay ── */}
+      {showOnboarding && (
+        <OnboardingOverlay
+          onComplete={() => {
+            markOnboardingSeen();
+            setShowOnboarding(false);
+          }}
+        />
+      )}
+
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1;    transform: scale(1); }
           50%       { opacity: 0.5; transform: scale(0.8); }
+        }
+        @keyframes cubeReveal {
+          0%   { opacity: 0; transform: scale(0.94); }
+          60%  { opacity: 1;                          }
+          100% { opacity: 1; transform: scale(1);    }
         }
         button:hover:not(:disabled) {
           background:   rgba(44,26,14,0.11) !important;
