@@ -1,14 +1,22 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 // Chillhop Radio (24/7 lo-fi YouTube live stream).
 // We embed the live stream in a hidden iframe and drive playback via
 // postMessage instead of loading the full YouTube iFrame Player API
 // script — postMessage commands work as long as the iframe URL has
 // `enablejsapi=1`, and that's all we need for play/pause/mute.
+//
+// `autoplay=1` asks the browser to start the stream as soon as the
+// iframe loads. Most browsers block audible autoplay until the user
+// interacts with the page, so we *also* arm a one-shot listener that
+// fires `playVideo` on the very first pointer/key event anywhere on
+// the page (see useEffect below). Together this means the music
+// kicks in either immediately (where allowed) or the instant the
+// user touches anything (everywhere else).
 const VIDEO_ID    = '5yx6BWlEVcY';
 const STREAM_NAME = 'Chillhop Radio';
 const STREAM_LINK = `https://www.youtube.com/live/${VIDEO_ID}`;
-const STREAM_URL  = `https://www.youtube.com/embed/${VIDEO_ID}?enablejsapi=1`;
+const STREAM_URL  = `https://www.youtube.com/embed/${VIDEO_ID}?enablejsapi=1&autoplay=1`;
 
 // Match the rest of the UI's paper / ink palette (App.tsx INK / INK_DIM).
 const INK       = '#2C1A0E';
@@ -19,7 +27,11 @@ const BG_HOVER  = 'rgba(44,26,14,0.11)';
 
 export function MusicPlayer() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [playing, setPlaying] = useState(false);
+  // Music defaults to ON at game start. The actual audible playback is
+  // gated by the browser's autoplay policy; the first-gesture effect
+  // below makes sure the audio kicks in as soon as the user touches
+  // anything if autoplay was blocked.
+  const [playing, setPlaying] = useState(true);
   const [muted,   setMuted]   = useState(false);
 
   // Send a YouTube iframe-API command via postMessage. Tolerates the
@@ -33,6 +45,30 @@ export function MusicPlayer() {
       '*',
     );
   };
+
+  // First-gesture autoplay fallback. Runs once per mount: on the first
+  // pointerdown/keydown anywhere on the page we send `playVideo` so
+  // the music starts even on browsers that suppress audible autoplay.
+  // Uses the capture phase so it fires before the player's own button
+  // handlers — that way a user whose first action is clicking the
+  // pause button still gets the desired final state (the explicit
+  // pauseVideo arrives after our playVideo and wins).
+  useEffect(() => {
+    let armed = true;
+    const onFirstGesture = () => {
+      if (!armed) return;
+      armed = false;
+      sendCommand('playVideo');
+      window.removeEventListener('pointerdown', onFirstGesture, true);
+      window.removeEventListener('keydown',     onFirstGesture, true);
+    };
+    window.addEventListener('pointerdown', onFirstGesture, true);
+    window.addEventListener('keydown',     onFirstGesture, true);
+    return () => {
+      window.removeEventListener('pointerdown', onFirstGesture, true);
+      window.removeEventListener('keydown',     onFirstGesture, true);
+    };
+  }, []);
 
   const togglePlay = () => {
     if (playing) sendCommand('pauseVideo');

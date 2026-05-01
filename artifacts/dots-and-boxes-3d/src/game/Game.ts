@@ -22,7 +22,7 @@ export class Game {
   private placeSound: HTMLAudioElement = (() => {
     const a = new Audio(`${import.meta.env.BASE_URL}sounds/edge-place.mp3`);
     a.preload = 'auto';
-    a.volume  = 0.6;
+    a.volume  = 0.48;  // 0.6 reduced by 20%
     return a;
   })();
 
