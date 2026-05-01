@@ -5,11 +5,10 @@ import React, { useRef, useState } from 'react';
 // postMessage instead of loading the full YouTube iFrame Player API
 // script — postMessage commands work as long as the iframe URL has
 // `enablejsapi=1`, and that's all we need for play/pause/mute.
-const CHANNEL_ID   = 'UCOxqgCwgOqC2lMqC5PYz_Dg';
-const CHANNEL_NAME = 'Chillhop Radio';
-const CHANNEL_URL  = `https://www.youtube.com/channel/${CHANNEL_ID}`;
-const STREAM_URL   =
-  `https://www.youtube.com/embed/live_stream?channel=${CHANNEL_ID}&enablejsapi=1`;
+const VIDEO_ID    = '5yx6BWlEVcY';
+const STREAM_NAME = 'Chillhop Radio';
+const STREAM_LINK = `https://www.youtube.com/live/${VIDEO_ID}`;
+const STREAM_URL  = `https://www.youtube.com/embed/${VIDEO_ID}?enablejsapi=1`;
 
 // Match the rest of the UI's paper / ink palette (App.tsx INK / INK_DIM).
 const INK       = '#2C1A0E';
@@ -73,7 +72,7 @@ export function MusicPlayer() {
       <iframe
         ref={iframeRef}
         src={STREAM_URL}
-        title={CHANNEL_NAME}
+        title={STREAM_NAME}
         allow="autoplay; encrypted-media; picture-in-picture"
         tabIndex={-1}
         aria-hidden="true"
@@ -143,7 +142,7 @@ export function MusicPlayer() {
         </div>
 
         <a
-          href={CHANNEL_URL}
+          href={STREAM_LINK}
           target="_blank"
           rel="noopener noreferrer"
           title="Open Chillhop Radio on YouTube"
@@ -159,7 +158,7 @@ export function MusicPlayer() {
             fontFamily:     'inherit',
           }}
         >
-          ♫ {CHANNEL_NAME}
+          ♫ {STREAM_NAME}
         </a>
       </div>
     </>
