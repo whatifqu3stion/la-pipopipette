@@ -132,7 +132,7 @@ function PlayerIndicator({
           lineHeight:    1,
           marginBottom:  2,
         }}>
-          P{player}
+          Player {player === 'A' ? '1' : '2'}
         </div>
         <div style={{
           color:      INK,
@@ -154,7 +154,7 @@ function GameOverBanner({
   winner, scores, onReset,
 }: { winner: Owner; scores: { A: number; B: number }; onReset: () => void }) {
   const color = winner ? PLAYER_COLORS[winner] : INK_MED;
-  const text  = winner ? `Player ${winner} wins!` : "It's a draw!";
+  const text  = winner ? `Player ${winner === 'A' ? '1' : '2'} wins!` : "It's a draw!";
 
   return (
     <div style={{
@@ -220,7 +220,7 @@ function GameOverBanner({
                 letterSpacing: '0.06em',
                 marginTop:     3,
               }}>
-                Player {p}
+                Player {p === 'A' ? '1' : '2'}
               </div>
             </div>
           ))}
