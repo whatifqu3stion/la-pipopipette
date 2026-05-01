@@ -4,155 +4,27 @@ import React, { useEffect, useState, useRef } from 'react';
 // Sequence: title → "A bit of history" → "What it is" → "How to play"
 // → onComplete() (which fades the overlay out and lets the cube reveal).
 //
-// All steps share a common cream/ink palette matching the rest of the
-// app so the overlay reads as part of the same world rather than a
-// separate page. The title uses Inter (already loaded by index.html)
-// for the geometric look the user requested.
+// Typography: Reenie Beanie (Google Fonts, a loose handwriting face)
+// throughout so the overlay feels like a pencil-and-paper aside rather
+// than a generic app screen. Larger font sizes than a sans-serif would
+// need — handwriting fonts have generous whitespace built into the glyphs.
 
-const INK         = '#2c1a0e';
-const INK_MED     = 'rgba(44,26,14,0.62)';
-const INK_DIM     = 'rgba(44,26,14,0.40)';
-const BG          = '#f5f0e8';
-const ACCENT_A    = '#2a82e0';
-const ACCENT_B    = '#e33334';
+const FONT          = '"Reenie Beanie", cursive';
+const INK           = '#2c1a0e';
+const INK_MED       = 'rgba(44,26,14,0.62)';
+const INK_DIM       = 'rgba(44,26,14,0.40)';
+const BG            = '#f5f0e8';
+const ACCENT_A      = '#2a82e0';
+const ACCENT_B      = '#e33334';
+
+// Title auto-advance: how long the title screen lingers before moving on.
+// Extended so the title has time to settle and the player can read it.
+const TITLE_HANG_MS = 5800;
 
 type Step = 'title' | 'history' | 'what' | 'how';
 
 interface OnboardingOverlayProps {
   onComplete: () => void;
-}
-
-// ----------------------------------------------------------------------------
-// Title — "La Pipopipette" rendered with a network-of-dots-and-lines motif
-// ----------------------------------------------------------------------------
-//
-// The title text itself stays a clean Inter wordmark (fully readable). Around
-// it we draw a thin geometric network: a rectangular frame with a midline
-// crossbar, connecting four corner nodes and four midpoint nodes. This
-// echoes the dot-and-edge vocabulary of the cube without trying to
-// deconstruct the letterforms (which is hard to do well at this size and
-// usually hurts legibility).
-//
-// Animation order on mount:
-//   0–500ms   nodes fade/scale in
-//   300–900ms lines draw in (stroke-dashoffset → 0)
-//   700ms+    title text fades + lifts in
-// ----------------------------------------------------------------------------
-function TitleNetwork() {
-  // viewBox is wide so the title has room. The SVG scales to fit its
-  // container width (CSS width: 100%, max-width via parent).
-  const W = 560;
-  const H = 180;
-  const pad = 24;             // distance from frame to viewBox edge
-  const x0 = pad, x1 = W - pad;
-  const y0 = pad, y1 = H - pad;
-  const xm = W / 2, ym = H / 2;
-
-  // Nodes: 4 corners + 4 midpoints. Slightly larger at corners to read as
-  // "endpoint" nodes vs the midpoint waypoints.
-  const nodes = [
-    { x: x0, y: y0, r: 4.5, delay: 0    },
-    { x: x1, y: y0, r: 4.5, delay: 90   },
-    { x: x1, y: y1, r: 4.5, delay: 180  },
-    { x: x0, y: y1, r: 4.5, delay: 270  },
-    { x: xm, y: y0, r: 3.5, delay: 360  },
-    { x: x1, y: ym, r: 3.5, delay: 420  },
-    { x: xm, y: y1, r: 3.5, delay: 480  },
-    { x: x0, y: ym, r: 3.5, delay: 540  },
-  ];
-
-  // Lines: outer rectangle (4 segments) plus four short inward notch
-  // segments anchored at the midpoint nodes. The notches gesture at
-  // a denser network without crossing the text — earlier iterations
-  // had a horizontal midline crossbar, but it ran straight through
-  // the wordmark and broke readability.
-  const NOTCH = 14;
-  const lines = [
-    { x1: x0, y1: y0, x2: x1, y2: y0, delay: 350 },  // top
-    { x1: x1, y1: y0, x2: x1, y2: y1, delay: 450 },  // right
-    { x1: x1, y1: y1, x2: x0, y2: y1, delay: 550 },  // bottom
-    { x1: x0, y1: y1, x2: x0, y2: y0, delay: 650 },  // left
-    // Notches: from each midpoint node a short tick pointing toward
-    // the centre of the frame. Together they read as a partial
-    // crosshair around (not over) the title.
-    { x1: xm, y1: y0, x2: xm, y2: y0 + NOTCH, delay: 800 }, // top → down
-    { x1: x1, y1: ym, x2: x1 - NOTCH, y2: ym, delay: 860 }, // right → left
-    { x1: xm, y1: y1, x2: xm, y2: y1 - NOTCH, delay: 920 }, // bottom → up
-    { x1: x0, y1: ym, x2: x0 + NOTCH, y2: ym, delay: 980 }, // left → right
-  ];
-
-  return (
-    <div
-      style={{
-        width:    '100%',
-        maxWidth: 560,
-        margin:   '0 auto',
-        position: 'relative',
-      }}
-    >
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}
-        aria-hidden="true"
-      >
-        {/* Lines: each has a long dash that starts fully offset (invisible)
-            and animates to dashoffset 0 (fully drawn) using the
-            'drawIn' keyframes defined in onboarding-anim.css below. */}
-        {lines.map((ln, i) => {
-          const len = Math.hypot(ln.x2 - ln.x1, ln.y2 - ln.y1);
-          return (
-            <line
-              key={`l${i}`}
-              x1={ln.x1} y1={ln.y1} x2={ln.x2} y2={ln.y2}
-              stroke={INK}
-              strokeWidth={1.4}
-              strokeLinecap="round"
-              strokeDasharray={len}
-              strokeDashoffset={len}
-              style={{
-                animation: `obDrawIn 600ms ease-out ${ln.delay}ms forwards`,
-              }}
-            />
-          );
-        })}
-
-        {/* Nodes: little circles with a pop-in scale animation. */}
-        {nodes.map((n, i) => (
-          <circle
-            key={`n${i}`}
-            cx={n.x} cy={n.y} r={n.r}
-            fill={INK}
-            style={{
-              transformBox:    'fill-box',
-              transformOrigin: 'center',
-              opacity:         0,
-              transform:       'scale(0.2)',
-              animation:       `obNodeIn 380ms cubic-bezier(.2,1.4,.4,1) ${n.delay}ms forwards`,
-            }}
-          />
-        ))}
-
-        {/* Title text */}
-        <text
-          x={xm} y={ym + 9}
-          textAnchor="middle"
-          fontFamily="Inter, -apple-system, BlinkMacSystemFont, sans-serif"
-          fontWeight={600}
-          fontSize={42}
-          fill={INK}
-          letterSpacing="-0.01em"
-          style={{
-            opacity:         0,
-            transformBox:    'fill-box',
-            transformOrigin: 'center',
-            animation:       'obTitleIn 700ms cubic-bezier(.2,.7,.2,1) 700ms forwards',
-          }}
-        >
-          La Pipopipette
-        </text>
-      </svg>
-    </div>
-  );
 }
 
 // ----------------------------------------------------------------------------
@@ -171,8 +43,8 @@ const SECTIONS: Record<Exclude<Step, 'title'>, {
         It was popularized by French mathematician{' '}
         <span style={{ color: INK, fontWeight: 600 }}>Édouard Lucas</span>,
         who called it{' '}
-        <span style={{ fontStyle: 'italic' }}>“La Pipopipette”</span>,
-        meaning <span style={{ fontStyle: 'italic' }}>“the game of little lines.”</span>
+        <span style={{ fontStyle: 'italic' }}>"La Pipopipette"</span>,
+        meaning <span style={{ fontStyle: 'italic' }}>"the game of little lines."</span>
       </>
     ),
     cta: 'Continue',
@@ -191,13 +63,13 @@ const SECTIONS: Record<Exclude<Step, 'title'>, {
     eyebrow: 'How to play',
     body: (
       <ul style={{
-        listStyle:  'none',
-        padding:    0,
-        margin:     '4px 0 0',
-        textAlign:  'left',
-        display:    'flex',
+        listStyle:     'none',
+        padding:       0,
+        margin:        '4px 0 0',
+        textAlign:     'left',
+        display:       'flex',
         flexDirection: 'column',
-        gap:        12,
+        gap:           14,
       }}>
         {[
           'Draw one line between two dots.',
@@ -205,13 +77,13 @@ const SECTIONS: Record<Exclude<Step, 'title'>, {
           'Complete a cube to claim it.',
           'Completing a cube gives you another turn.',
           'Most cubes wins.',
-          'The last line of a cube is powerful — make sure you’re the one taking it.',
+          "The last line of a cube is powerful — make sure you're the one taking it.",
         ].map((line, i) => (
           <li key={i} style={{
             display:    'flex',
             alignItems: 'baseline',
             gap:        12,
-            lineHeight: 1.45,
+            lineHeight: 1.35,
           }}>
             <span style={{
               flexShrink:  0,
@@ -262,9 +134,8 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
     window.setTimeout(onComplete, 480);
   };
 
-  // Auto-advance from the title screen after a short hold so users who
-  // don't click still proceed. They can also click "Continue" to skip
-  // ahead at any time.
+  // Auto-advance from the title screen after TITLE_HANG_MS so users who
+  // don't click still proceed. They can also click "Continue" to skip ahead.
   useEffect(() => {
     if (step !== 'title') return;
     const t = window.setTimeout(() => {
@@ -272,24 +143,24 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
         stepKey.current += 1;
         setStep('history');
       }
-    }, 4200);
+    }, TITLE_HANG_MS);
     return () => window.clearTimeout(t);
   }, [step, closing]);
 
   return (
     <>
-      {/* Inline keyframes — kept colocated so the overlay is fully
-          self-contained and we don't have to add a global stylesheet
-          just for these animations. */}
+      {/* Inline keyframes — colocated so the overlay is self-contained. */}
       <style>{`
         @keyframes obOverlayIn  { from { opacity: 0; } to { opacity: 1; } }
         @keyframes obOverlayOut { from { opacity: 1; } to { opacity: 0; } }
 
-        @keyframes obDrawIn     { to { stroke-dashoffset: 0; } }
-        @keyframes obNodeIn     { to { opacity: 1; transform: scale(1); } }
-        @keyframes obTitleIn    {
-          0%   { opacity: 0; transform: translateY(8px) scale(0.985); }
-          100% { opacity: 1; transform: translateY(0)   scale(1);     }
+        @keyframes obTitleIn {
+          0%   { opacity: 0; transform: translateY(12px) scale(0.97); }
+          100% { opacity: 1; transform: translateY(0)    scale(1);    }
+        }
+        @keyframes obSubtitleIn {
+          0%   { opacity: 0; transform: translateY(6px); }
+          100% { opacity: 1; transform: translateY(0);   }
         }
 
         @keyframes obPanelIn {
@@ -302,7 +173,7 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
         }
 
         .ob-cta { transition: background 0.15s, border-color 0.15s, transform 0.1s; }
-        .ob-cta:hover { background: rgba(44,26,14,0.10); }
+        .ob-cta:hover  { background: rgba(44,26,14,0.10); }
         .ob-cta:active { transform: translateY(1px); }
 
         .ob-skip { transition: color 0.15s; }
@@ -314,7 +185,7 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
           position:       'fixed',
           inset:          0,
           background:     BG,
-          zIndex:         50,                       // above canvas (which is z<10)
+          zIndex:         50,
           display:        'flex',
           flexDirection:  'column',
           alignItems:     'center',
@@ -322,16 +193,14 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
           padding:        '24px 24px',
           paddingTop:     'calc(env(safe-area-inset-top, 0px) + 24px)',
           paddingBottom:  'calc(env(safe-area-inset-bottom, 0px) + 24px)',
-          fontFamily:     'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily:     FONT,
           color:          INK,
           animation:      closing
             ? 'obOverlayOut 460ms ease-in forwards'
             : 'obOverlayIn 360ms ease-out forwards',
         }}
       >
-        {/* Skip link — small, top-right; lets returning visitors who
-            re-cleared storage, or anyone who wants to jump straight to
-            the cube, do so without reading. */}
+        {/* Skip link */}
         {step !== 'title' && !closing && (
           <button
             onClick={finish}
@@ -343,9 +212,8 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
               background: 'transparent',
               border:     'none',
               color:      INK_DIM,
-              fontFamily: 'inherit',
-              fontSize:   13,
-              letterSpacing: '0.02em',
+              fontFamily: FONT,
+              fontSize:   18,
               cursor:     'pointer',
               padding:    '6px 8px',
             }}
@@ -363,34 +231,43 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
               textAlign: 'center',
             }}
           >
-            <TitleNetwork />
+            {/* Main title */}
             <div style={{
-              marginTop:     20,
-              fontSize:      13,
+              fontSize:   'clamp(72px, 16vw, 110px)',
+              lineHeight: 1.05,
+              color:      INK,
+              opacity:    0,
+              animation:  'obTitleIn 900ms cubic-bezier(.2,.7,.2,1) 200ms forwards',
+            }}>
+              La Pipopipette
+            </div>
+
+            {/* Sub-label */}
+            <div style={{
+              marginTop:     14,
+              fontSize:      28,
               color:         INK_DIM,
-              letterSpacing: '0.16em',
-              textTransform: 'uppercase',
               opacity:       0,
-              animation:     'obTitleIn 600ms ease-out 1300ms forwards',
+              animation:     'obSubtitleIn 700ms ease-out 900ms forwards',
             }}>
               3D Dots &amp; Boxes
             </div>
+
             <button
               onClick={goNext}
               className="ob-cta"
               style={{
-                marginTop:    36,
-                padding:      '12px 28px',
+                marginTop:    48,
+                padding:      '10px 32px',
                 borderRadius: 12,
                 border:       `1px solid rgba(44,26,14,0.18)`,
                 background:   'rgba(44,26,14,0.06)',
                 color:        INK,
-                fontFamily:   'inherit',
-                fontSize:     15,
-                fontWeight:   600,
+                fontFamily:   FONT,
+                fontSize:     26,
                 cursor:       'pointer',
                 opacity:      0,
-                animation:    'obButtonIn 500ms ease-out 1700ms forwards',
+                animation:    'obButtonIn 500ms ease-out 1400ms forwards',
               }}
             >
               Begin
@@ -400,27 +277,26 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
           <div
             key={stepKey.current}
             style={{
-              width:        '100%',
-              maxWidth:     520,
-              textAlign:    'center',
-              animation:    'obPanelIn 420ms cubic-bezier(.2,.7,.2,1) forwards',
+              width:     '100%',
+              maxWidth:  520,
+              textAlign: 'center',
+              animation: 'obPanelIn 420ms cubic-bezier(.2,.7,.2,1) forwards',
             }}
           >
+            {/* Eyebrow */}
             <div style={{
-              fontSize:      12,
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
+              fontSize:      22,
               color:         INK_DIM,
-              marginBottom:  12,
+              marginBottom:  10,
             }}>
               {SECTIONS[step].eyebrow}
             </div>
 
+            {/* Body */}
             <div style={{
-              fontSize:   step === 'how' ? 16 : 18,
-              lineHeight: 1.55,
+              fontSize:   step === 'how' ? 22 : 26,
+              lineHeight: 1.45,
               color:      INK_MED,
-              fontWeight: 400,
             }}>
               {SECTIONS[step].body}
             </div>
@@ -430,14 +306,13 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
               className="ob-cta"
               style={{
                 marginTop:    36,
-                padding:      '12px 28px',
+                padding:      '10px 32px',
                 borderRadius: 12,
                 border:       `1px solid rgba(44,26,14,0.18)`,
                 background:   'rgba(44,26,14,0.06)',
                 color:        INK,
-                fontFamily:   'inherit',
-                fontSize:     15,
-                fontWeight:   600,
+                fontFamily:   FONT,
+                fontSize:     26,
                 cursor:       'pointer',
                 opacity:      0,
                 animation:    'obButtonIn 420ms ease-out 220ms forwards',
@@ -448,10 +323,10 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
 
             {/* Step indicator dots */}
             <div style={{
-              marginTop:  24,
-              display:    'flex',
+              marginTop:      24,
+              display:        'flex',
               justifyContent: 'center',
-              gap:        8,
+              gap:            8,
             }}>
               {(['history', 'what', 'how'] as const).map(s => (
                 <div
