@@ -2,7 +2,7 @@ import { GameState } from './GameState';
 import { Renderer, EDGE_ANIM_MS } from './Renderer';
 import { CameraController } from './CameraController';
 import { InputController } from './InputController';
-import { buildPoints, edgeKey, getCubeEdges } from './GameModel';
+import { buildPoints, edgeKey, faceKey, getCubeEdges } from './GameModel';
 
 export class Game {
   private state: GameState;
@@ -25,6 +25,23 @@ export class Game {
     a.volume  = 0.36;  // 0.6 → 0.48 (-20%) → 0.36 (-25%)
     return a;
   })();
+
+  // Face-fill sound — plays when a panel finishes filling in (i.e. a
+  // player just closed the 4th edge of a face square). Same volume as
+  // placeSound so the two SFX sit at parity in the mix. Cloned per
+  // play so multiple closures in one move don't clip each other.
+  private fillSound: HTMLAudioElement = (() => {
+    const a = new Audio(`${import.meta.env.BASE_URL}sounds/face-fill.mp3`);
+    a.preload = 'auto';
+    a.volume  = 0.36;  // matched to placeSound
+    return a;
+  })();
+
+  // Snapshot of which face keys were complete after the last render
+  // sync. Used to detect newly-closed faces in onPlace so we can fire
+  // fillSound exactly once per fresh closure (and not on undo / load /
+  // generic re-syncs).
+  private completedFaceKeys = new Set<string>();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -49,8 +66,15 @@ export class Game {
 
   private syncRendererWithState() {
     this.syncRendererEdges();
-    this.renderer.updateFaceStates(this.state.getFaceStates());
+    const faces = this.state.getFaceStates();
+    this.renderer.updateFaceStates(faces);
     this.renderer.updateCubeStates(this.state.getCubeStates());
+    // Reset the completed-face snapshot to whatever's currently on the
+    // board so the next onPlace only fires fillSound for genuinely new
+    // closures (load / undo / reset enter through here).
+    this.completedFaceKeys = new Set(
+      faces.filter(f => f.complete).map(f => faceKey(f.face))
+    );
   }
 
   // Edge-only slice of syncRendererWithState — used on placement so the
@@ -263,8 +287,31 @@ export class Game {
       // the timeout so any further state changes (additional placements,
       // undo) during the delay are reflected when the deferred call fires.
       setTimeout(() => {
-        this.renderer.updateFaceStates(this.state.getFaceStates());
+        const faces = this.state.getFaceStates();
+        // Detect any face that flipped from incomplete → complete since
+        // the last sync. Done before updateFaceStates so the snapshot
+        // genuinely reflects the prior render-side state. Only fire
+        // fillSound once per call regardless of how many faces closed,
+        // so a double-closure (placing the shared edge of two squares)
+        // doesn't fire two stacked clicks of the same SFX.
+        let newlyClosed = 0;
+        const nextComplete = new Set<string>();
+        for (const f of faces) {
+          if (!f.complete) continue;
+          const key = faceKey(f.face);
+          nextComplete.add(key);
+          if (!this.completedFaceKeys.has(key)) newlyClosed++;
+        }
+        this.completedFaceKeys = nextComplete;
+
+        this.renderer.updateFaceStates(faces);
         this.renderer.updateCubeStates(this.state.getCubeStates());
+
+        if (newlyClosed > 0) {
+          const sfx = this.fillSound.cloneNode() as HTMLAudioElement;
+          sfx.volume = this.fillSound.volume;
+          sfx.play().catch(() => { /* ignore — autoplay/decode errors are non-fatal */ });
+        }
       }, EDGE_ANIM_MS);
 
       // Clone-and-play so rapid placements overlap cleanly. Cloned nodes
