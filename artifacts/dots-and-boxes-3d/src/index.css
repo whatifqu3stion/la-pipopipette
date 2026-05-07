@@ -25,3 +25,7 @@ button {
   cursor: pointer;
   user-select: none;
 }
+
+@media (max-width: 600px) {
+  .pcp { display: none !important; }
+}
