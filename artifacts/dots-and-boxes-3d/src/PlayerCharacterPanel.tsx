@@ -54,8 +54,12 @@ export function PlayerCharacterPanel({ player, isActive, gameOver }: Props) {
         zIndex:        5,
         pointerEvents: 'none',
         userSelect:    'none',
-        // Blend into the paper background exactly like the crumple overlay.
+        // Blend into the paper background. multiply makes pure white invisible;
+        // the contrast+brightness filter pushes the video's off-white paper
+        // background toward true white so it fully disappears via multiply,
+        // while keeping the character lines crisp and dark.
         mixBlendMode:  'multiply' as React.CSSProperties['mixBlendMode'],
+        filter:        'contrast(1.8) brightness(1.08)',
         // Slide-up + fade transition when turn changes.
         opacity:       show ? 0.45 : 0,
         transform:     show ? 'translateY(0px)' : 'translateY(24px)',
