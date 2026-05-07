@@ -417,6 +417,11 @@ export default function App() {
             display:         'block',
             transformOrigin: 'center center',
             animation:       'cubeReveal 900ms cubic-bezier(.2,.7,.2,1) both',
+            // Permanently promote the WebGL canvas to its own GPU compositing
+            // layer. Without this, browsers (especially Chrome) can mis-render
+            // the canvas viewport when sibling elements use mix-blend-mode,
+            // causing the cube to appear in the wrong position on screen.
+            willChange:      'transform',
           }}
         />
       )}
