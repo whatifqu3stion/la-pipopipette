@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import penSketch from '@assets/pen-sketch.png';
 
 // Onboarding overlay shown the first time a player visits the game.
 // Sequence: title → "A bit of history" → "What it is" → "How to play"
@@ -281,74 +282,94 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
           <div
             key={stepKey.current}
             style={{
-              width:     '100%',
-              maxWidth:  520,
-              textAlign: 'center',
-              animation: 'obPanelIn 420ms cubic-bezier(.2,.7,.2,1) forwards',
+              width:      '100%',
+              maxWidth:   700,
+              display:    'flex',
+              alignItems: 'center',
+              gap:        40,
+              animation:  'obPanelIn 420ms cubic-bezier(.2,.7,.2,1) forwards',
             }}
           >
-            {/* Eyebrow */}
-            <div style={{
-              fontSize:      11,
-              fontWeight:    600,
-              letterSpacing: '0.10em',
-              textTransform: 'uppercase',
-              color:         INK_DIM,
-              marginBottom:  14,
-            }}>
-              {SECTIONS[step].eyebrow}
+            {/* ── Text column ── */}
+            <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+              {/* Eyebrow */}
+              <div style={{
+                fontSize:      11,
+                fontWeight:    600,
+                letterSpacing: '0.10em',
+                textTransform: 'uppercase',
+                color:         INK_DIM,
+                marginBottom:  14,
+              }}>
+                {SECTIONS[step].eyebrow}
+              </div>
+
+              {/* Body */}
+              <div style={{
+                fontSize:   step === 'how' ? 15 : 17,
+                lineHeight: 1.65,
+                color:      INK_MED,
+              }}>
+                {SECTIONS[step].body}
+              </div>
+
+              <button
+                onClick={goNext}
+                className="ob-cta"
+                style={{
+                  marginTop:     36,
+                  padding:       '10px 32px',
+                  borderRadius:  12,
+                  border:        `1px solid rgba(44,26,14,0.18)`,
+                  background:    'rgba(44,26,14,0.06)',
+                  color:         INK,
+                  fontSize:      15,
+                  fontWeight:    500,
+                  letterSpacing: '0.03em',
+                  cursor:        'pointer',
+                  opacity:       0,
+                  animation:     'obButtonIn 420ms ease-out 220ms forwards',
+                }}
+              >
+                {SECTIONS[step].cta}
+              </button>
+
+              {/* Step indicator dots */}
+              <div style={{
+                marginTop:      24,
+                display:        'flex',
+                justifyContent: 'center',
+                gap:            8,
+              }}>
+                {(['history', 'what', 'how'] as const).map(s => (
+                  <div
+                    key={s}
+                    style={{
+                      width:        6,
+                      height:       6,
+                      borderRadius: '50%',
+                      background:   s === step ? INK : 'rgba(44,26,14,0.18)',
+                      transition:   'background 0.2s',
+                    }}
+                  />
+                ))}
+              </div>
             </div>
 
-            {/* Body */}
-            <div style={{
-              fontSize:   step === 'how' ? 15 : 17,
-              lineHeight: 1.65,
-              color:      INK_MED,
-            }}>
-              {SECTIONS[step].body}
-            </div>
-
-            <button
-              onClick={goNext}
-              className="ob-cta"
+            {/* ── Pen sketch ── */}
+            <img
+              src={penSketch}
+              alt=""
+              aria-hidden="true"
               style={{
-                marginTop:     36,
-                padding:       '10px 32px',
-                borderRadius:  12,
-                border:        `1px solid rgba(44,26,14,0.18)`,
-                background:    'rgba(44,26,14,0.06)',
-                color:         INK,
-                fontSize:      15,
-                fontWeight:    500,
-                letterSpacing: '0.03em',
-                cursor:        'pointer',
-                opacity:       0,
-                animation:     'obButtonIn 420ms ease-out 220ms forwards',
+                flexShrink:    0,
+                height:        'min(260px, 38vh)',
+                width:         'auto',
+                opacity:       0.88,
+                pointerEvents: 'none',
+                userSelect:    'none',
               }}
-            >
-              {SECTIONS[step].cta}
-            </button>
-
-            {/* Step indicator dots */}
-            <div style={{
-              marginTop:      24,
-              display:        'flex',
-              justifyContent: 'center',
-              gap:            8,
-            }}>
-              {(['history', 'what', 'how'] as const).map(s => (
-                <div
-                  key={s}
-                  style={{
-                    width:        6,
-                    height:       6,
-                    borderRadius: '50%',
-                    background:   s === step ? INK : 'rgba(44,26,14,0.18)',
-                    transition:   'background 0.2s',
-                  }}
-                />
-              ))}
-            </div>
+            />
           </div>
         )}
       </div>
