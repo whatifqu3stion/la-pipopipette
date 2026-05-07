@@ -76,9 +76,10 @@ export function PlayerCharacterPanel({ player, isActive, gameOver }: Props) {
         autoPlay
         style={{
           display: 'block',
-          // Responsive width keeps the panel clear of the cube at all
-          // viewport widths above the 900px hide threshold.
-          width:  'clamp(80px, 11vw, 150px)',
+          // Responsive width, scaled per character:
+          //   frog  (A) = base × 1.50
+          //   bunny (B) = base × 1.15
+          width:  isLeft ? 'clamp(120px, 16.5vw, 225px)' : 'clamp(92px, 12.65vw, 173px)',
           height: 'auto',
         }}
       >
