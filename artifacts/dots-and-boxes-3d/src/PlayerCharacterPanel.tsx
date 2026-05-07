@@ -5,13 +5,13 @@ import { useEffect, useRef } from 'react';
 // Player A (blue frog)  → left side
 // Player B (red rabbit) → right side
 //
-// The panel is vertically centered alongside the cube and uses a
-// responsive width (clamp via vw) so it never reaches the cube's
-// edge regardless of viewport width.  mix-blend-mode: multiply
-// makes the video's paper background disappear so only the character
-// lines are visible, blending into the game's paper surface.
+// Each panel is anchored near the bottom button bar and horizontally
+// centered in the gutter between the cube edge and the screen wall.
+// mix-blend-mode: multiply + contrast/brightness filter erase the
+// video's off-white paper background so only the character ink lines
+// are visible against the game surface.
 //
-// Hidden at ≤900px (via index.css .pcp rule) — below that width the
+// Hidden at ≤900px via .pcp rule in index.css — below that width the
 // cube fills too much horizontal space for the panels to fit safely.
 
 interface Props {
@@ -45,27 +45,26 @@ export function PlayerCharacterPanel({ player, isActive, gameOver }: Props) {
       aria-hidden="true"
       style={{
         position:      'absolute',
-        // Vertically centered alongside the cube center — panels truly
-        // flank the cube rather than sitting near the bottom bar.
-        top:           '50%',
-        transform:     show
-          ? 'translateY(-50%) translateX(0px)'
-          : `translateY(-50%) translateX(${isLeft ? '-18px' : '18px'})`,
-        // 2% from the screen edge so it never overlaps the cube.
-        left:          isLeft  ? '2%' : undefined,
-        right:         !isLeft ? '2%' : undefined,
+        // Anchor near the bottom bar so the character's feet sit just
+        // above the button row. The characters extend upward from here.
+        bottom:        'calc(env(safe-area-inset-bottom, 0px) + 100px)',
+        // Horizontally centered in the gutter between the cube edge
+        // and the screen wall — roughly 8% in from each side.
+        left:          isLeft  ? '8%' : undefined,
+        right:         !isLeft ? '8%' : undefined,
         // Between crumple overlay (z=2) and the UI bars (z=10).
         zIndex:        5,
         pointerEvents: 'none',
         userSelect:    'none',
-        // Blend into the paper background. The contrast+brightness filter
-        // pushes the video's off-white paper background toward pure white
-        // so multiply makes it fully disappear, leaving only the character
-        // ink lines.
+        // Blend into the paper background; filter pushes the off-white
+        // video background toward pure white so multiply erases it.
         mixBlendMode:  'multiply' as React.CSSProperties['mixBlendMode'],
         filter:        'contrast(1.8) brightness(1.08)',
-        // Slide in from the side + fade when turn activates.
+        // Slide in from the side + fade on turn change.
         opacity:       show ? 0.45 : 0,
+        transform:     show
+          ? 'translateX(0px)'
+          : `translateX(${isLeft ? '-20px' : '20px'})`,
         transition:    'opacity 350ms ease-out, transform 350ms ease-out',
       }}
     >
@@ -77,9 +76,8 @@ export function PlayerCharacterPanel({ player, isActive, gameOver }: Props) {
         autoPlay
         style={{
           display: 'block',
-          // Responsive width: 11vw keeps the panel well clear of the cube
-          // at all viewport widths above the 900px hide threshold.
-          // Max 150px so it never gets too large on ultra-wide displays.
+          // Responsive width keeps the panel clear of the cube at all
+          // viewport widths above the 900px hide threshold.
           width:  'clamp(80px, 11vw, 150px)',
           height: 'auto',
         }}
