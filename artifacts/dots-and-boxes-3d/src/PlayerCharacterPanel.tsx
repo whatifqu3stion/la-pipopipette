@@ -1,16 +1,18 @@
 import { useEffect, useRef } from 'react';
 
-// Animated character sketch panels that appear flanking the 3D cube.
+// Animated character sketch panels that flank the 3D cube.
 //
 // Player A (blue frog)  → left side
 // Player B (red rabbit) → right side
 //
-// The panel slides up and fades in when it's that player's turn, using
-// mix-blend-mode: multiply so the sketch reads as part of the paper
-// surface rather than a floating overlay. Videos are served from
-// public/videos/ (not bundled) and referenced via BASE_URL.
-// The .pcp hide rule at <=600px lives in index.css to avoid duplicate
-// style injection when both panels are mounted simultaneously.
+// The panel is vertically centered alongside the cube and uses a
+// responsive width (clamp via vw) so it never reaches the cube's
+// edge regardless of viewport width.  mix-blend-mode: multiply
+// makes the video's paper background disappear so only the character
+// lines are visible, blending into the game's paper surface.
+//
+// Hidden at ≤900px (via index.css .pcp rule) — below that width the
+// cube fills too much horizontal space for the panels to fit safely.
 
 interface Props {
   player:   'A' | 'B';
@@ -22,7 +24,6 @@ export function PlayerCharacterPanel({ player, isActive, gameOver }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const show     = isActive && !gameOver;
 
-  // Imperatively play/pause so the video is in sync with the active state.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -44,25 +45,27 @@ export function PlayerCharacterPanel({ player, isActive, gameOver }: Props) {
       aria-hidden="true"
       style={{
         position:      'absolute',
-        // Sit just above the bottom bar (~100px) so the character's feet
-        // land near the bottom of the game area.
-        bottom:        'calc(env(safe-area-inset-bottom, 0px) + 100px)',
-        // Horizontal: 2% from the screen edge (mobile hidden via index.css).
+        // Vertically centered alongside the cube center — panels truly
+        // flank the cube rather than sitting near the bottom bar.
+        top:           '50%',
+        transform:     show
+          ? 'translateY(-50%) translateX(0px)'
+          : `translateY(-50%) translateX(${isLeft ? '-18px' : '18px'})`,
+        // 2% from the screen edge so it never overlaps the cube.
         left:          isLeft  ? '2%' : undefined,
         right:         !isLeft ? '2%' : undefined,
         // Between crumple overlay (z=2) and the UI bars (z=10).
         zIndex:        5,
         pointerEvents: 'none',
         userSelect:    'none',
-        // Blend into the paper background. multiply makes pure white invisible;
-        // the contrast+brightness filter pushes the video's off-white paper
-        // background toward true white so it fully disappears via multiply,
-        // while keeping the character lines crisp and dark.
+        // Blend into the paper background. The contrast+brightness filter
+        // pushes the video's off-white paper background toward pure white
+        // so multiply makes it fully disappear, leaving only the character
+        // ink lines.
         mixBlendMode:  'multiply' as React.CSSProperties['mixBlendMode'],
         filter:        'contrast(1.8) brightness(1.08)',
-        // Slide-up + fade transition when turn changes.
+        // Slide in from the side + fade when turn activates.
         opacity:       show ? 0.45 : 0,
-        transform:     show ? 'translateY(0px)' : 'translateY(24px)',
         transition:    'opacity 350ms ease-out, transform 350ms ease-out',
       }}
     >
@@ -74,10 +77,11 @@ export function PlayerCharacterPanel({ player, isActive, gameOver }: Props) {
         autoPlay
         style={{
           display: 'block',
-          // Responsive height: cap at 28vh so it never crowds the cube,
-          // with an absolute max of 200px on tall desktop screens.
-          height:  'min(28vh, 200px)',
-          width:   'auto',
+          // Responsive width: 11vw keeps the panel well clear of the cube
+          // at all viewport widths above the 900px hide threshold.
+          // Max 150px so it never gets too large on ultra-wide displays.
+          width:  'clamp(80px, 11vw, 150px)',
+          height: 'auto',
         }}
       >
         <source src={webm} type="video/webm" />
