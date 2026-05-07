@@ -27,11 +27,11 @@ const BG_HOVER  = 'rgba(44,26,14,0.11)';
 
 export function MusicPlayer() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  // Music defaults to ON at game start. The actual audible playback is
-  // gated by the browser's autoplay policy; the first-gesture effect
-  // below makes sure the audio kicks in as soon as the user touches
-  // anything if autoplay was blocked.
-  const [playing, setPlaying] = useState(true);
+  // Start as false — honest default. Browsers almost always block audible
+  // autoplay, so showing the Pause icon on load would be misleading (music
+  // isn't actually playing yet). The first-gesture effect below kicks off
+  // playback and flips this to true the moment the user touches anything.
+  const [playing, setPlaying] = useState(false);
   const [muted,   setMuted]   = useState(false);
 
   // Send a YouTube iframe-API command via postMessage. Tolerates the
@@ -47,20 +47,23 @@ export function MusicPlayer() {
   };
 
   // First-gesture autoplay fallback. Runs once per mount: on the first
-  // pointerdown/keydown anywhere on the page we send `playVideo` so
-  // the music starts even on browsers that suppress audible autoplay.
-  // Uses the capture phase so it fires before the player's own button
-  // handlers — that way a user whose first action is clicking the
-  // pause button still gets the desired final state (the explicit
-  // pauseVideo arrives after our playVideo and wins).
+  // pointerdown/keydown anywhere on the page we send `playVideo` and
+  // flip playing→true so the UI stays in sync. Uses the capture phase
+  // so it fires before button handlers — if the first gesture IS the
+  // Play button, both this handler and togglePlay send playVideo
+  // (duplicate, harmless) and both set playing=true.
   useEffect(() => {
     let armed = true;
     const onFirstGesture = () => {
       if (!armed) return;
       armed = false;
-      sendCommand('playVideo');
       window.removeEventListener('pointerdown', onFirstGesture, true);
       window.removeEventListener('keydown',     onFirstGesture, true);
+      sendCommand('playVideo');
+      // Sync React state so the UI immediately shows Pause — the user's
+      // first interaction is what starts playback, so we know we want
+      // playing=true at this point regardless of which element was clicked.
+      setPlaying(true);
     };
     window.addEventListener('pointerdown', onFirstGesture, true);
     window.addEventListener('keydown',     onFirstGesture, true);
