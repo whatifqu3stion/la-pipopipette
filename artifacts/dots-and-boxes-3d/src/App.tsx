@@ -3,6 +3,7 @@ import { Game } from './game/Game';
 import type { Owner } from './game/types';
 import { MusicPlayer } from './MusicPlayer';
 import { OnboardingOverlay } from './OnboardingOverlay';
+import { PlayerCharacterPanel } from './PlayerCharacterPanel';
 import paperCrumpleOverlay from '@assets/white-paper-texture_1777522901345.jpg';
 
 // First-run onboarding is gated by a localStorage flag. Versioned key
@@ -456,6 +457,22 @@ export default function App() {
       {/* Grain is supplied entirely by the Atmosphere shader pass inside the
           WebGL pipeline (see Renderer.ts), depth-masked to geometry only.
           No DOM overlay or React-side tuning surface is needed here. */}
+
+      {/* ── Character panels ──
+           Blue frog (Player A) on the left, red rabbit (Player B) on the right.
+           Each slides in when it's that player's turn and blends into the paper
+           surface via mix-blend-mode: multiply (same as the crumple overlay).
+           Hidden on screens narrower than 600px. */}
+      <PlayerCharacterPanel
+        player="A"
+        isActive={ui.currentPlayer === 'A'}
+        gameOver={ui.gameOver}
+      />
+      <PlayerCharacterPanel
+        player="B"
+        isActive={ui.currentPlayer === 'B'}
+        gameOver={ui.gameOver}
+      />
 
       {/* ── TOP BAR ── */}
       <div style={{
