@@ -15,7 +15,7 @@ const PLAYER_COLORS: Record<string, number> = {
   B: 0xff3b40, // vibrant fire-engine red
 };
 
-const BG_COLOR      = 0xf5f0e8; // warm off-white paper
+const BG_COLOR      = 0xf9f7f2; // warm off-white paper
 const NEUTRAL_COLOR = 0xa8987f; // warm gray — used for corner dots (slightly darker for crisper read)
 // Neutral edge color: a muted warm gray that reads clearly as grid
 // structure but stays subordinate to played edges. Combined with a lit

@@ -14,7 +14,7 @@ const MODERN_FONT   = 'Inter, system-ui, sans-serif';
 const INK           = '#2c1a0e';
 const INK_MED       = 'rgba(44,26,14,0.62)';
 const INK_DIM       = 'rgba(44,26,14,0.40)';
-const BG            = '#f5f0e8';
+const BG            = '#f9f7f2';
 const ACCENT_A      = '#2a82e0';
 const ACCENT_B      = '#e33334';
 
