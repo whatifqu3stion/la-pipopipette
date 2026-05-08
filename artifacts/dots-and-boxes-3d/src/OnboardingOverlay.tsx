@@ -279,19 +279,23 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
             </button>
           </div>
         ) : (
+          // Stable wrapper — never re-keyed so the pen sketch img is never
+          // unmounted between steps (which caused the flicker). Only the
+          // text column carries the key so its enter animation still restarts.
           <div
-            key={stepKey.current}
             style={{
               width:      '100%',
               maxWidth:   700,
               display:    'flex',
               alignItems: 'center',
               gap:        40,
-              animation:  'obPanelIn 420ms cubic-bezier(.2,.7,.2,1) forwards',
             }}
           >
-            {/* ── Text column ── */}
-            <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+            {/* ── Text column — keyed so the slide-in animation restarts ── */}
+            <div
+              key={stepKey.current}
+              style={{ flex: 1, minWidth: 0, textAlign: 'center', animation: 'obPanelIn 420ms cubic-bezier(.2,.7,.2,1) forwards' }}
+            >
               {/* Eyebrow */}
               <div style={{
                 fontSize:      11,
