@@ -61,7 +61,7 @@ export function PlayerCharacterPanel({ player, isActive, gameOver }: Props) {
         mixBlendMode:  'multiply' as React.CSSProperties['mixBlendMode'],
         filter:        'contrast(1.8) brightness(1.08)',
         // Slide in from the side + fade on turn change.
-        opacity:       show ? 0.45 : 0,
+        opacity:       show ? 0.62 : 0,
         transform:     show
           ? 'translateX(0px)'
           : `translateX(${isLeft ? '-20px' : '20px'})`,
