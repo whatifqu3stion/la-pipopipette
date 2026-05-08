@@ -362,20 +362,29 @@ export class Game {
     // controller (fit-distance + zoom range) need to react to viewport
     // changes — so the cube always fits cleanly between the floating UI bars
     // on any screen from a 320 px phone to a 4K desktop.
+    //
+    // IMPORTANT: we observe the *parent* element, not the canvas itself.
+    // Three.js calls renderer.setSize() which writes an explicit pixel value
+    // to canvas.style.width/height, so the canvas's own border-box never
+    // changes when the window is resized — the ResizeObserver would never
+    // fire if we watched the canvas. The parent is a position:fixed / inset:0
+    // div whose clientWidth/clientHeight always match the current viewport.
+    const sizeTarget = canvas.parentElement ?? canvas;
+
     const ro = new ResizeObserver(() => {
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
+      const w = sizeTarget.clientWidth;
+      const h = sizeTarget.clientHeight;
       if (w > 0 && h > 0) {
         this.renderer.resize(w, h);
         this.cameraCtrl.setViewport(w, h);
       }
     });
-    ro.observe(canvas);
+    ro.observe(sizeTarget);
 
     // Initial fit — ResizeObserver fires async, so do one synchronous pass
     // here so the very first frame already has a sensible camera distance.
-    const w0 = canvas.clientWidth;
-    const h0 = canvas.clientHeight;
+    const w0 = sizeTarget.clientWidth;
+    const h0 = sizeTarget.clientHeight;
     if (w0 > 0 && h0 > 0) {
       this.renderer.resize(w0, h0);
       this.cameraCtrl.setViewport(w0, h0);
