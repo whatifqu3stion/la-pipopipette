@@ -29,7 +29,12 @@ export default defineConfig({
   base: basePath,
   plugins: [
     react(),
-    runtimeErrorOverlay(),
+    // A browser reports cross-origin script failures without an Error object.
+    // The overlay cannot identify or diagnose those events, so avoid showing
+    // a misleading modal while preserving it for every real app exception.
+    runtimeErrorOverlay({
+      filter: (error) => error.message !== "(unknown runtime error)",
+    }),
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
       ? [

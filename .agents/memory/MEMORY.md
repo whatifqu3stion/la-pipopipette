@@ -1,0 +1,1 @@
+- [Runtime overlay and external scripts](runtime-overlay-external-scripts.md) — cross-origin script failures can surface as opaque browser events; keep diagnostics for actionable app errors.
