@@ -8,11 +8,65 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Reenie+Beanie&display=swap" rel="stylesheet">
-    <script async src="https://vibejam.cc/2026/widget.js"></script>
+    <script>
+      // The hosted Vibe Jam widget currently serves malformed JavaScript in
+      // some environments ("Unexpected identifier 'a'"). Keep the badge and
+      // heartbeat locally so a third-party syntax error cannot crash the app.
+      (function () {
+        function initVibeJam() {
+          if (document.querySelector('a[data-vibejam-badge]')) return;
+
+          var anchor = document.createElement('a');
+          anchor.dataset.vibejamBadge = 'true';
+          anchor.target = '_blank';
+          anchor.rel = 'noopener noreferrer';
+          anchor.href = 'https://vibejam.com/';
+          anchor.textContent = '🕹️ Vibe Jam 2026';
+          anchor.style.cssText =
+            "font-family: system-ui, sans-serif; position: fixed; bottom: -1px; right: -1px; padding: 7px 14px; font-size: 14px; font-weight: bold; background: #000; color: #fff; text-decoration: none; z-index: 10000; border-top-left-radius: 12px; border: 1px solid #000;";
+          document.body.appendChild(anchor);
+
+          var active = false;
+          var timer = null;
+          function onInput() { active = true; }
+          function tick() {
+            if (!active) return;
+            fetch('https://vibejam.com/2026/heartbeat.php', {
+              method: 'GET',
+              mode: 'cors',
+              keepalive: true
+            }).catch(function () {});
+            active = false;
+          }
+          ['keydown', 'mousedown', 'mousemove', 'touchstart', 'touchmove',
+            'wheel', 'gamepadconnected'].forEach(function (eventName) {
+            document.addEventListener(eventName, onInput);
+          });
+          function start() {
+            if (!timer) timer = setInterval(tick, 60000);
+          }
+          function stop() {
+            if (timer) {
+              clearInterval(timer);
+              timer = null;
+            }
+          }
+          if (document.visibilityState !== 'hidden') start();
+          document.addEventListener('visibilitychange', function () {
+            document.visibilityState === 'hidden' ? stop() : start();
+          });
+        }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', initVibeJam);
+        } else {
+          initVibeJam();
+        }
+      })();
+    </script>
     <script>
       // Re-anchor the Vibe Jam tracker to the middle of the right edge,
       // rotated 90° counter-clockwise. The widget script appends a single
-      // <a href="https://vibej.am/"> to body and sets its style via
+      // <a href="https://vibejam.com/"> to body and sets its style via
       // .cssText (no !important), so external/inline overrides with
       // !important win. Tracking (event listeners on document + heartbeat
       // fetch to vibej.am) is independent of these visual styles, so we
@@ -84,7 +138,7 @@
           }
         }
         function tryClaim() {
-          var a = document.querySelector('a[href="https://vibej.am/"]');
+          var a = document.querySelector('a[data-vibejam-badge]');
           if (!a) return false;
           anchor = a;
           ensureLastChild();
