@@ -1,0 +1,61 @@
+name: Build and deploy game to GitHub Pages
+
+on:
+  push:
+    branches: [la-pipopipette]
+  pull_request:
+    branches: [la-pipopipette]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install game dependencies
+        run: pnpm install --frozen-lockfile --filter @workspace/dots-and-boxes-3d...
+      - name: Typecheck game
+        run: pnpm --filter @workspace/dots-and-boxes-3d run typecheck
+      - name: Build game
+        run: pnpm --filter @workspace/dots-and-boxes-3d run build
+        env:
+          PORT: 5173
+          BASE_PATH: /la-pipopipette/
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/la-pipopipette'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
