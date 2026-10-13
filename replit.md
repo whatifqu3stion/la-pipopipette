@@ -31,10 +31,10 @@ See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and pa
 ### 3D Dots & Boxes (`artifacts/dots-and-boxes-3d`)
 - **Type**: react-vite, preview at `/`
 - **Stack**: React + Vite + Three.js (TypeScript)
-- **Description**: 3D Dots & Boxes game with gravity rule. Two-player same-device turn-based strategy.
+- **Description**: 3D Dots & Boxes game. Two-player same-device turn-based strategy; any unplaced edge is a valid move.
 - **Modules**:
   - `src/game/types.ts` — TypeScript types (Edge, Face, Cube, Owner, etc.)
-  - `src/game/GameModel.ts` — Pure data model: grid building, adjacency logic, gravity support
+  - `src/game/GameModel.ts` — Pure data model: grid building and adjacency logic
   - `src/game/GameState.ts` — Game logic: turn management, scoring, undo, event system
   - `src/game/Renderer.ts` — Three.js scene: points, edges (with hit zones), faces, cubes; postprocessing pipeline with depth-of-field (BokehPass) and a depth-masked paper-grain ShaderPass (cube only, fixed `GRAIN_STRENGTH`)
   - `src/game/CameraController.ts` — Turntable camera: cube yaw spins with 90° snap + overshoot; user-controlled elevation (10°–80°) via vertical drag; fixed azimuth
