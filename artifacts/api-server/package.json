@@ -16,7 +16,7 @@
     "cors": "^2",
     "drizzle-orm": "catalog:",
     "express": "^5",
-    "pino": "^9",
+    "pino": "^10",
     "pino-http": "^10"
   },
   "devDependencies": {
