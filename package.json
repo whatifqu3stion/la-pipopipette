@@ -10,7 +10,7 @@
   },
   "private": true,
   "devDependencies": {
-    "typescript": "~5.9.2",
+    "typescript": "~7.0.2",
     "prettier": "^3.8.1"
   },
   "engines": {
